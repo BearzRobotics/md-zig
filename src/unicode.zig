@@ -60,3 +60,29 @@ pub fn decodeBefore(s: []const u8, end: usize) u21 {
     if (start + d.len != end) return 0xfffd;
     return d.cp;
 }
+
+/// How many terminal columns a code point takes: 0 for combining marks and
+/// zero-width characters, 2 for East Asian wide characters and emoji, else 1.
+/// An approximation by ranges (there is no Unicode database in the standard
+/// library).
+pub fn displayWidth(cp: u21) usize {
+    return switch (cp) {
+        0x0300...0x036f, 0x200b...0x200f, 0x2060...0x2064, 0xfe00...0xfe0f, 0x20d0...0x20ff => 0,
+        0x1100...0x115f, 0x2e80...0x303e, 0x3041...0x33ff, 0x3400...0x4dbf, 0x4e00...0x9fff => 2,
+        0xa000...0xa4cf, 0xac00...0xd7a3, 0xf900...0xfaff, 0xfe30...0xfe6f, 0xff00...0xff60 => 2,
+        0xffe0...0xffe6, 0x1f300...0x1f64f, 0x1f900...0x1f9ff, 0x20000...0x3fffd => 2,
+        else => 1,
+    };
+}
+
+/// The columns a UTF-8 string takes in a terminal.
+pub fn stringWidth(s: []const u8) usize {
+    var w: usize = 0;
+    var i: usize = 0;
+    while (i < s.len) {
+        const d = decodeAt(s, i);
+        w += displayWidth(d.cp);
+        i += d.len;
+    }
+    return w;
+}

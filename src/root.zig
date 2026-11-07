@@ -20,6 +20,8 @@ pub const ListData = ast.ListData;
 pub const Walker = ast.Walker;
 pub const Event = ast.Event;
 pub const html = @import("html.zig");
+pub const term = @import("term.zig");
+pub const TextOptions = term.TextOptions;
 const block = @import("block.zig");
 
 pub const Options = @import("options.zig").Options;
@@ -92,6 +94,19 @@ pub const Document = struct {
         try html.write(gpa, self.root, &self.footnotes, self.extensions, w);
     }
 
+    /// Writes the document as text for a terminal (see `TextOptions`).
+    pub fn writeText(self: *const Document, gpa: Allocator, w: *Io.Writer, options: TextOptions) term.Error!void {
+        try term.write(gpa, self.root, &self.footnotes, options, w);
+    }
+
+    /// The document as terminal text in memory, owned by the caller.
+    pub fn toTextAlloc(self: *const Document, gpa: Allocator, options: TextOptions) Allocator.Error![]u8 {
+        var out: Io.Writer.Allocating = .init(gpa);
+        errdefer out.deinit();
+        self.writeText(gpa, &out.writer, options) catch return error.OutOfMemory;
+        return out.toOwnedSlice();
+    }
+
     /// The document as HTML in memory, owned by the caller.
     pub fn toHtmlAlloc(self: *const Document, gpa: Allocator) Allocator.Error![]u8 {
         var out: Io.Writer.Allocating = .init(gpa);
@@ -125,4 +140,5 @@ test {
     _ = @import("scan.zig");
     _ = @import("tests.zig");
     _ = @import("io_tests.zig");
+    _ = @import("term_tests.zig");
 }

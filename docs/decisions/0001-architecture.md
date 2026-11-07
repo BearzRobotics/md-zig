@@ -1,7 +1,7 @@
 # 0001: Architecture of md-zig
 
 Status: accepted by the maintainer in conversation (dialect and order of work);
-implementation in progress.
+implemented for steps 1 to 5 except definition lists (not started).
 
 ## Problem
 
