@@ -55,6 +55,13 @@ const Prefix = struct {
     cont: []const u8,
     /// Written once instead of `cont`, on the next line.
     first: ?[]const u8 = null,
+    /// Display width of `first` when it holds escape sequences.
+    first_width: ?usize = null,
+
+    fn width(self: Prefix) usize {
+        if (self.first) |f| return self.first_width orelse unicode.stringWidth(f);
+        return unicode.stringWidth(self.cont);
+    }
 };
 
 const Used = struct { key: []const u8, def: *Node };
@@ -78,7 +85,7 @@ const Renderer = struct {
 
     fn prefixWidth(self: *const Renderer) usize {
         var n: usize = 0;
-        for (self.prefixes.items) |p| n += unicode.stringWidth(p.first orelse p.cont);
+        for (self.prefixes.items) |p| n += p.width();
         return n;
     }
 
@@ -415,7 +422,10 @@ const Renderer = struct {
             },
             .block_quote => {
                 try self.beginBlock();
-                try self.prefixes.append(self.a, .{ .cont = if (self.o.unicode) "│ " else "> " });
+                // A quote with an indent hint (`indent`, set by readers of other
+                // formats such as man pages) is plain indentation.
+                const bar: []const u8 = if (n.indent > 0) try self.spaces(n.indent) else if (self.o.unicode) "│ " else "> ";
+                try self.prefixes.append(self.a, .{ .cont = bar });
                 try self.children(n);
                 _ = self.prefixes.pop();
                 self.endBlock();
@@ -427,16 +437,49 @@ const Renderer = struct {
         }
     }
 
-    /// Terms in bold on their own line, definitions indented below them.
+    fn spaces(self: *Renderer, n: usize) Allocator.Error![]const u8 {
+        const s = try self.a.alloc(u8, n);
+        @memset(s, ' ');
+        return s;
+    }
+
+    /// Terms in bold, definitions indented below them. A definition with an
+    /// indent hint (`indent`) starts on the term's line when the term is
+    /// shorter than the indent, as in man pages.
     fn deflist(self: *Renderer, n: *Node) Error!void {
         try self.beginBlock();
         var child = n.first_child;
-        while (child) |c| : (child = c.next) {
+        while (child) |c| {
+            var next = c.next;
             switch (c.kind) {
                 .deflist_term => {
                     // Terms after the first are set off from the definitions above.
                     if (c.prev != null and c.prev.?.kind == .deflist_def) self.need_blank = true;
                     try self.beginBlock();
+                    const def: ?*Node = if (c.next) |nx| (if (nx.kind == .deflist_def) nx else null) else null;
+                    if (def) |d| {
+                        if (d.indent > 0 and d.first_child != null) {
+                            const lines = try self.cellLines(c, 0);
+                            const tw = if (lines.len == 1) visibleWidth(lines[0]) else d.indent;
+                            if (tw < d.indent) {
+                                var first: std.ArrayList(u8) = .empty;
+                                try first.appendSlice(self.a, lines[0]);
+                                try first.appendNTimes(self.a, ' ', d.indent - tw);
+                                try self.prefixes.append(self.a, .{
+                                    .cont = try self.spaces(d.indent),
+                                    .first = first.items,
+                                    .first_width = d.indent,
+                                });
+                                self.need_blank = false;
+                                try self.children(d);
+                                _ = self.prefixes.pop();
+                                self.need_blank = !n.list.tight and d.next != null;
+                                next = d.next;
+                                child = next;
+                                continue;
+                            }
+                        }
+                    }
                     var tokens: std.ArrayList(Token) = .empty;
                     defer tokens.deinit(self.a);
                     if (self.o.color) try tokens.append(self.a, .{ .style = .{ .field = .bold, .on = true } });
@@ -446,7 +489,8 @@ const Renderer = struct {
                     self.need_blank = !n.list.tight and c.next != null and c.next.?.kind == .deflist_term;
                 },
                 .deflist_def => {
-                    try self.prefixes.append(self.a, .{ .cont = "    " });
+                    const indent = if (c.indent > 0) try self.spaces(c.indent) else "    ";
+                    try self.prefixes.append(self.a, .{ .cont = indent });
                     self.need_blank = false;
                     try self.children(c);
                     _ = self.prefixes.pop();
@@ -454,6 +498,7 @@ const Renderer = struct {
                 },
                 else => {},
             }
+            child = next;
         }
         self.endBlock();
     }

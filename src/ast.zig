@@ -86,6 +86,11 @@ pub const Node = struct {
     header: bool = false,
     /// Task list marker of an `item`.
     task: Task = .none,
+    /// Display indent hint in columns for `block_quote` and `deflist_def`. The
+    /// Markdown parser never sets it (0). Readers of other formats (man pages)
+    /// do: the terminal renderer then indents by this amount without a quote
+    /// bar, and puts a short definition term on the same line as its text.
+    indent: u16 = 0,
 
     /// 1-based line on which the block starts (0 for inlines).
     line: u32 = 0,

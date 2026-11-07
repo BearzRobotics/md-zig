@@ -87,3 +87,53 @@ test "words that touch are not split across lines" {
     defer gpa.free(out);
     try std.testing.expectEqualStrings("aaaaaaaaaaaaaaaaaaa\n`cc`) dd\n", out);
 }
+
+fn hintedDeflist(gpa: std.mem.Allocator, padding: usize) !md.Document {
+    var doc = try md.Document.parse(gpa, "term\n: definition text that is long enough to wrap around the line end\n\nlongterm-over\n: second\n", .{ .extensions = .{ .definition_lists = true } });
+    errdefer doc.deinit();
+    var n = doc.root.first_child;
+    while (n) |x| : (n = x.next) {
+        if (x.kind != .deflist) continue;
+        var c = x.first_child;
+        while (c) |y| : (c = y.next) if (y.kind == .deflist_def) {
+            y.indent = @intCast(padding);
+        };
+    }
+    return doc;
+}
+
+test "indent hint: a short term shares the line with its definition" {
+    const gpa = std.testing.allocator;
+    var doc = try hintedDeflist(gpa, 8);
+    defer doc.deinit();
+    const out = try doc.toTextAlloc(gpa, .{ .width = 30 });
+    defer gpa.free(out);
+    try std.testing.expectEqualStrings(
+        "term    definition text that\n" ++
+            "        is long enough to wrap\n" ++
+            "        around the line end\n" ++
+            "\n" ++
+            "longterm-over\n" ++
+            "        second\n",
+        out,
+    );
+}
+
+test "indent hint: without it the layout is the Markdown one" {
+    const gpa = std.testing.allocator;
+    var doc = try md.Document.parse(gpa, "term\n: def\n", .{ .extensions = .{ .definition_lists = true } });
+    defer doc.deinit();
+    const out = try doc.toTextAlloc(gpa, .{ .width = 30 });
+    defer gpa.free(out);
+    try std.testing.expectEqualStrings("term\n    def\n", out);
+}
+
+test "a quote with an indent hint is plain indentation" {
+    const gpa = std.testing.allocator;
+    var doc = try md.Document.parse(gpa, "> quoted\n", .{});
+    defer doc.deinit();
+    doc.root.first_child.?.indent = 4;
+    const out = try doc.toTextAlloc(gpa, .{ .width = 30 });
+    defer gpa.free(out);
+    try std.testing.expectEqualStrings("    quoted\n", out);
+}

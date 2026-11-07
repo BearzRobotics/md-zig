@@ -18,6 +18,15 @@
 | `html.zig` | HTML renderer (also footnote section, tag filter) |
 | `term.zig` | Terminal renderer (wrapping, lists, tables, ANSI) |
 
+## The tree as an interface
+
+`ast.zig` is shared with other projects: gtroff-zig builds the same tree from
+man and mdoc pages, and dkman renders it. Node kinds and fields are therefore
+API. `Node.indent` is the one field Markdown never sets: readers of other
+formats use it to ask the terminal renderer for plain indentation of a
+`block_quote` (no bar) and for a `deflist_def` whose short term shares a line
+with its text.
+
 ## Data flow
 
 1. `Document.parseReader` streams one line at a time out of the reader
