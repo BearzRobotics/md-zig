@@ -16,6 +16,8 @@ pub fn build(b: *std.Build) void {
     // The specification's examples, compared byte for byte (src/tests.zig).
     mod.addAnonymousImport("spec-0.31.2.json", .{ .root_source_file = b.path("test/fixtures/spec-0.31.2.json") });
 
+    mod.addAnonymousImport("gfm-extensions.json", .{ .root_source_file = b.path("test/fixtures/gfm-extensions.json") });
+
     const test_step = b.step("test", "Run unit and conformance tests");
     const unit = b.addTest(.{ .root_module = mod });
     test_step.dependOn(&b.addRunArtifact(unit).step);

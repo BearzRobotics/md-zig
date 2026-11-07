@@ -24,7 +24,19 @@ pub const Kind = enum {
     strong,
     link,
     image,
+    // Extensions.
+    strikethrough,
+    table,
+    table_row,
+    table_cell,
+    footnote_def,
+    footnote_ref,
+    front_matter,
 };
+
+pub const Align = enum { none, left, center, right };
+
+pub const Task = enum { none, unchecked, checked };
 
 pub const ListKind = enum { bullet, ordered };
 
@@ -61,6 +73,12 @@ pub const Node = struct {
     /// Level (1 to 6) of a heading.
     level: u8 = 0,
     list: ListData = .{},
+    /// Column alignment of a `table_cell`.
+    align_: Align = .none,
+    /// True for the header `table_row`.
+    header: bool = false,
+    /// Task list marker of an `item`.
+    task: Task = .none,
 
     /// 1-based line on which the block starts (0 for inlines).
     line: u32 = 0,
@@ -79,6 +97,8 @@ pub const Node = struct {
         html_type: u8 = 0,
         /// Raw text of an open leaf block, one line per `\n`.
         content: std.ArrayList(u8) = .empty,
+        /// Column alignments of a table being built.
+        aligns: []const Align = &.{},
     };
 
     pub fn appendChild(self: *Node, child: *Node) void {
@@ -124,6 +144,7 @@ pub const Node = struct {
     pub fn isContainer(self: *const Node) bool {
         return switch (self.kind) {
             .document, .block_quote, .list, .item, .paragraph, .heading, .emph, .strong, .link, .image => true,
+            .strikethrough, .table, .table_row, .table_cell, .footnote_def => true,
             else => false,
         };
     }

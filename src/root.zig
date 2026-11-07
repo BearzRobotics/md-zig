@@ -22,12 +22,8 @@ pub const Event = ast.Event;
 pub const html = @import("html.zig");
 const block = @import("block.zig");
 
-pub const Options = struct {
-    /// Longest accepted input, in bytes.
-    max_bytes: usize = 64 * 1024 * 1024,
-    /// Longest accepted line, in bytes.
-    max_line_bytes: usize = 4 * 1024 * 1024,
-};
+pub const Options = @import("options.zig").Options;
+pub const Extensions = @import("options.zig").Extensions;
 
 pub const ParseError = error{
     OutOfMemory,
@@ -42,6 +38,8 @@ pub const ParseError = error{
 pub const Document = struct {
     arena: std.heap.ArenaAllocator,
     root: *Node,
+    extensions: Extensions = .{},
+    footnotes: html.Footnotes = .empty,
 
     /// Parses a complete text.
     pub fn parse(gpa: Allocator, source: []const u8, options: Options) ParseError!Document {
@@ -54,7 +52,7 @@ pub const Document = struct {
     pub fn parseReader(gpa: Allocator, r: *Io.Reader, options: Options) ParseError!Document {
         var arena = std.heap.ArenaAllocator.init(gpa);
         errdefer arena.deinit();
-        var parser = try block.Parser.init(arena.allocator());
+        var parser = try block.Parser.init(arena.allocator(), options.extensions);
 
         var line: Io.Writer.Allocating = .init(gpa);
         defer line.deinit();
@@ -81,7 +79,7 @@ pub const Document = struct {
             if (!have_newline) break;
         }
         try parser.finish();
-        return .{ .arena = arena, .root = parser.doc };
+        return .{ .arena = arena, .root = parser.doc, .extensions = options.extensions, .footnotes = parser.footnotes };
     }
 
     pub fn deinit(self: *Document) void {
@@ -90,15 +88,15 @@ pub const Document = struct {
     }
 
     /// Writes the document as HTML.
-    pub fn writeHtml(self: *const Document, w: *Io.Writer) Io.Writer.Error!void {
-        try html.write(self.root, w);
+    pub fn writeHtml(self: *const Document, gpa: Allocator, w: *Io.Writer) html.Error!void {
+        try html.write(gpa, self.root, &self.footnotes, self.extensions, w);
     }
 
     /// The document as HTML in memory, owned by the caller.
     pub fn toHtmlAlloc(self: *const Document, gpa: Allocator) Allocator.Error![]u8 {
         var out: Io.Writer.Allocating = .init(gpa);
         errdefer out.deinit();
-        self.writeHtml(&out.writer) catch return error.OutOfMemory;
+        self.writeHtml(gpa, &out.writer) catch return error.OutOfMemory;
         return out.toOwnedSlice();
     }
 };

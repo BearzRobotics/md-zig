@@ -153,7 +153,7 @@ test "writeHtml is identical through a small-buffer writer" {
     var lw: LimitedWriter = undefined;
     lw.setup(std.math.maxInt(usize));
     defer lw.out.deinit(gpa);
-    try doc.writeHtml(&lw.interface);
+    try doc.writeHtml(gpa, &lw.interface);
     try lw.interface.flush();
     try testing.expectEqualStrings(want, lw.out.items);
 }
@@ -169,7 +169,7 @@ test "writeHtml reports WriteFailed wherever the writer dies" {
         var lw: LimitedWriter = undefined;
         lw.setup(limit);
         defer lw.out.deinit(gpa);
-        const result = doc.writeHtml(&lw.interface);
+        const result = doc.writeHtml(gpa, &lw.interface);
         const flushed = lw.interface.flush();
         try testing.expect(std.meta.isError(result) or std.meta.isError(flushed));
     }

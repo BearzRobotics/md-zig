@@ -10,6 +10,8 @@ const ast = @import("ast.zig");
 const text = @import("text.zig");
 const scan = @import("scan.zig");
 const inl = @import("inline.zig");
+const unicode = @import("unicode.zig");
+const opts = @import("options.zig");
 const Node = ast.Node;
 
 const code_indent = 4;
@@ -21,6 +23,13 @@ pub const Parser = struct {
     oldtip: *Node,
     last_matched: *Node,
     refs: inl.RefMap = .empty,
+    ext: opts.Extensions,
+    /// Footnote definitions by normalized label (first definition wins).
+    footnotes: std.StringHashMapUnmanaged(*Node) = .empty,
+
+    // Front matter: lines are held back until the closing fence shows up.
+    fm_state: enum { unchecked, inside, done } = .unchecked,
+    fm_lines: std.ArrayList([]const u8) = .empty,
 
     line: []const u8 = "",
     line_number: u32 = 0,
@@ -34,10 +43,10 @@ pub const Parser = struct {
     partially_consumed_tab: bool = false,
     all_closed: bool = true,
 
-    pub fn init(a: Allocator) Allocator.Error!Parser {
+    pub fn init(a: Allocator, ext: opts.Extensions) Allocator.Error!Parser {
         const doc = try a.create(Node);
         doc.* = .{ .kind = .document, .line = 1 };
-        return .{ .a = a, .doc = doc, .tip = doc, .oldtip = doc, .last_matched = doc };
+        return .{ .a = a, .doc = doc, .tip = doc, .oldtip = doc, .last_matched = doc, .ext = ext };
     }
 
     // ---- helpers ---------------------------------------------------------------------
@@ -109,6 +118,8 @@ pub const Parser = struct {
     }
 
     fn addLine(self: *Parser) Allocator.Error!void {
+        // The line that starts a table (its delimiter row) adds nothing.
+        if (self.tip.kind == .table and self.offset >= self.line.len) return;
         const content = &self.tip.build.content;
         if (self.partially_consumed_tab) {
             self.offset += 1; // the tab itself
@@ -121,14 +132,14 @@ pub const Parser = struct {
 
     fn canContain(parent: ast.Kind, child: ast.Kind) bool {
         return switch (parent) {
-            .document, .block_quote, .item => child != .item,
+            .document, .block_quote, .item, .footnote_def => child != .item,
             .list => child == .item,
             else => false,
         };
     }
 
     fn acceptsLines(kind: ast.Kind) bool {
-        return kind == .paragraph or kind == .code_block or kind == .html_block;
+        return kind == .paragraph or kind == .code_block or kind == .html_block or kind == .table;
     }
 
     fn addChild(self: *Parser, kind: ast.Kind) Allocator.Error!*Node {
@@ -171,8 +182,9 @@ pub const Parser = struct {
         block.build.open = false;
         switch (block.kind) {
             .paragraph => {
-                // Leading link reference definitions are removed from the paragraph.
                 var content: []const u8 = block.build.content.items;
+                if (self.ext.task_lists) content = taskMarker(block, content);
+                // Leading link reference definitions are removed from the paragraph.
                 var had_defs = false;
                 while (content.len > 0 and content[0] == '[') {
                     const used = try inl.parseReference(self.a, &self.refs, content);
@@ -184,6 +196,7 @@ pub const Parser = struct {
                 if (had_defs and isBlank(content)) block.unlink();
             },
             .heading => block.literal = block.build.content.items,
+            .table => try self.buildTable(block),
             .code_block => {
                 const content = block.build.content.items;
                 if (block.build.fenced) {
@@ -283,6 +296,21 @@ pub const Parser = struct {
                 return if (self.blank and (t == 6 or t == 7)) .not_matched else .matched;
             },
             .paragraph => return if (self.blank) .not_matched else .matched,
+            .table => {
+                // A table ends at a blank line or where another block starts.
+                if (self.blank or self.startsOtherBlock()) return .not_matched;
+                return .matched;
+            },
+            .footnote_def => {
+                if (self.blank) {
+                    if (container.first_child == null) return .not_matched;
+                    self.advanceNextNonspace();
+                    return .matched;
+                }
+                if (self.indent < 4) return .not_matched;
+                self.advanceOffset(4, true);
+                return .matched;
+            },
             else => return .not_matched,
         }
     }
@@ -296,15 +324,17 @@ pub const Parser = struct {
             1 => return self.startAtxHeading(),
             2 => return self.startFencedCode(),
             3 => return self.startHtmlBlock(container),
-            4 => return self.startSetextHeading(container),
-            5 => return self.startThematicBreak(),
-            6 => return self.startListItem(container),
-            7 => return self.startIndentedCode(),
+            4 => return self.startFootnoteDef(),
+            5 => return self.startTable(container),
+            6 => return self.startSetextHeading(container),
+            7 => return self.startThematicBreak(),
+            8 => return self.startListItem(container),
+            9 => return self.startIndentedCode(),
             else => unreachable,
         }
     }
 
-    const block_start_count = 8;
+    const block_start_count = 10;
 
     fn startBlockQuote(self: *Parser) Allocator.Error!u8 {
         if (self.indented or self.at(self.next_nonspace) != '>') return 0;
@@ -610,13 +640,221 @@ pub const Parser = struct {
         return 2;
     }
 
-    fn maybeSpecial(c: u8) bool {
-        return std.mem.findScalar(u8, "#`~*+_=<>-", c) != null or std.ascii.isDigit(c);
+    fn maybeSpecial(self: *const Parser, c: u8) bool {
+        if (std.mem.findScalar(u8, "#`~*+_=<>-", c) != null or std.ascii.isDigit(c)) return true;
+        if (self.ext.tables and (c == '|' or c == ':')) return true;
+        return self.ext.footnotes and c == '[';
+    }
+
+    // ---- extensions ------------------------------------------------------------------
+
+    /// Handles a line while the start of the document may be front matter.
+    /// True when the line was consumed.
+    fn frontMatterLine(self: *Parser, ln: []const u8) Allocator.Error!bool {
+        const trimmed = std.mem.trimEnd(u8, ln, " \t");
+        switch (self.fm_state) {
+            .unchecked => {
+                if (self.line_number != 0 or !std.mem.eql(u8, trimmed, "---")) {
+                    self.fm_state = .done;
+                    return false;
+                }
+                self.fm_state = .inside;
+                try self.fm_lines.append(self.a, try self.a.dupe(u8, ln));
+                return true;
+            },
+            .inside => {
+                if (std.mem.eql(u8, trimmed, "---") or std.mem.eql(u8, trimmed, "...")) {
+                    var body: std.ArrayList(u8) = .empty;
+                    for (self.fm_lines.items[1..]) |l| {
+                        try body.appendSlice(self.a, l);
+                        try body.append(self.a, '\n');
+                    }
+                    const n = try self.newNode(.front_matter);
+                    n.line = 1;
+                    n.literal = body.items;
+                    n.build.open = false;
+                    self.doc.appendChild(n);
+                    self.fm_state = .done;
+                    // The lines were counted so that line numbers stay right.
+                    self.line_number = @intCast(self.fm_lines.items.len + 1);
+                    self.fm_lines.clearRetainingCapacity();
+                    return true;
+                }
+                try self.fm_lines.append(self.a, try self.a.dupe(u8, ln));
+                return true;
+            },
+            .done => return false,
+        }
+    }
+
+    /// True when the current line begins a block that would end a table.
+    fn startsOtherBlock(self: *const Parser) bool {
+        if (self.indent >= 4) return false;
+        const rest = self.line[self.next_nonspace..];
+        if (rest.len == 0) return false;
+        if (rest[0] == '>') return true;
+        if (rest[0] == '#') {
+            var n: usize = 0;
+            while (n < rest.len and rest[n] == '#') n += 1;
+            if (n <= 6 and (n == rest.len or text.isSpaceOrTab(rest[n]))) return true;
+        }
+        if (openingFence(rest) != null) return true;
+        return false;
+    }
+
+    fn startFootnoteDef(self: *Parser) Allocator.Error!u8 {
+        if (!self.ext.footnotes or self.indented) return 0;
+        const rest = self.line[self.next_nonspace..];
+        if (rest.len < 5 or rest[0] != '[' or rest[1] != '^') return 0;
+        var i: usize = 2;
+        while (i < rest.len and rest[i] != ']' and rest[i] != '[' and !text.isWhitespace(rest[i])) i += 1;
+        if (i == 2 or i + 1 >= rest.len or rest[i] != ']' or rest[i + 1] != ':') return 0;
+        const label = rest[2..i];
+
+        try self.closeUnmatchedBlocks();
+        self.advanceNextNonspace();
+        self.advanceOffset(i + 2, false);
+        while (text.isSpaceOrTab(self.at(self.offset))) self.advanceOffset(1, true);
+        const node = try self.addChild(.footnote_def);
+        const key = try text.normalizeLabel(self.a, label);
+        node.literal = key;
+        const gop = try self.footnotes.getOrPut(self.a, key);
+        if (!gop.found_existing) gop.value_ptr.* = node;
+        return 1;
+    }
+
+    /// `[ ]` or `[x]` at the start of a list item's first paragraph: records
+    /// the task on the item and returns the text after the marker.
+    fn taskMarker(para: *Node, content: []const u8) []const u8 {
+        const item = para.parent orelse return content;
+        if (item.kind != .item or item.first_child != para) return content;
+        if (content.len < 3 or content[0] != '[' or content[2] != ']') return content;
+        const task: ast.Task = switch (content[1]) {
+            ' ' => .unchecked,
+            'x', 'X' => .checked,
+            else => return content,
+        };
+        if (content.len > 3 and !text.isWhitespace(content[3])) return content;
+        item.task = task;
+        return std.mem.trimStart(u8, content[3..], " \t");
+    }
+
+    /// Splits one table row into cells. Leading and trailing pipes are
+    /// optional; `\|` is a pipe inside a cell.
+    fn splitRow(a: Allocator, line: []const u8) Allocator.Error![]const []const u8 {
+        var s = std.mem.trim(u8, line, " \t");
+        if (s.len > 0 and s[0] == '|') s = s[1..];
+        if (s.len > 0 and s[s.len - 1] == '|' and !pipeEscaped(s, s.len - 1)) s = s[0 .. s.len - 1];
+        var cells: std.ArrayList([]const u8) = .empty;
+        var start: usize = 0;
+        var i: usize = 0;
+        while (i <= s.len) : (i += 1) {
+            if (i < s.len and !(s[i] == '|' and !pipeEscaped(s, i))) continue;
+            const raw = std.mem.trim(u8, s[start..i], " \t");
+            try cells.append(a, if (std.mem.find(u8, raw, "\\|") != null) try replaceAll(a, raw, "\\|", "|") else raw);
+            start = i + 1;
+        }
+        return cells.items;
+    }
+
+    fn pipeEscaped(s: []const u8, i: usize) bool {
+        var n: usize = 0;
+        while (n < i and s[i - 1 - n] == '\\') n += 1;
+        return n % 2 == 1;
+    }
+
+    fn replaceAll(a: Allocator, s: []const u8, needle: []const u8, with: []const u8) Allocator.Error![]const u8 {
+        var out: std.ArrayList(u8) = .empty;
+        var i: usize = 0;
+        while (i < s.len) {
+            if (std.mem.startsWith(u8, s[i..], needle)) {
+                try out.appendSlice(a, with);
+                i += needle.len;
+            } else {
+                try out.append(a, s[i]);
+                i += 1;
+            }
+        }
+        return out.items;
+    }
+
+    /// The alignments of a delimiter row (`| :-- | --: |`), or null when the
+    /// line is not one. It must contain a pipe, or `---` alone would be a table.
+    fn delimiterRow(a: Allocator, line: []const u8) Allocator.Error!?[]const ast.Align {
+        if (std.mem.findScalar(u8, line, '|') == null) return null;
+        const cells = try splitRow(a, line);
+        var aligns: std.ArrayList(ast.Align) = .empty;
+        for (cells) |c| {
+            if (c.len == 0) return null;
+            const left = c[0] == ':';
+            const right = c.len > 1 and c[c.len - 1] == ':';
+            const dashes = c[@intFromBool(left) .. c.len - @intFromBool(right)];
+            if (dashes.len == 0) return null;
+            for (dashes) |d| if (d != '-') return null;
+            try aligns.append(a, if (left and right) .center else if (left) .left else if (right) .right else .none);
+        }
+        return aligns.items;
+    }
+
+    fn startTable(self: *Parser, container: *Node) Allocator.Error!u8 {
+        if (!self.ext.tables or self.indented or container.kind != .paragraph) return 0;
+        const aligns = (try delimiterRow(self.a, self.line[self.next_nonspace..])) orelse return 0;
+
+        // The header row is the paragraph's last line.
+        const content = container.build.content.items;
+        const body = content[0 .. content.len - 1];
+        const cut = if (std.mem.findScalarLast(u8, body, '\n')) |nl| nl + 1 else 0;
+        const header = body[cut..];
+        if ((try splitRow(self.a, header)).len != aligns.len) return 0;
+
+        try self.closeUnmatchedBlocks();
+        if (cut > 0) {
+            // The lines above the header stay a paragraph.
+            container.build.content.items = container.build.content.items[0..cut];
+        } else {
+            self.tip = container.parent.?;
+            container.unlink();
+        }
+        const table = try self.addChild(.table);
+        table.build.aligns = aligns;
+        try table.build.content.appendSlice(self.a, header);
+        try table.build.content.append(self.a, '\n');
+        self.advanceOffset(self.line.len - self.offset, false);
+        return 2;
+    }
+
+    /// Turns the collected lines of a table into rows and cells.
+    fn buildTable(self: *Parser, table: *Node) Allocator.Error!void {
+        const aligns = table.build.aligns;
+        var lines = std.mem.splitScalar(u8, table.build.content.items, '\n');
+        var first = true;
+        while (lines.next()) |line| {
+            if (line.len == 0 and lines.peek() == null) break;
+            const cells = try splitRow(self.a, line);
+            const row = try self.newNode(.table_row);
+            row.header = first;
+            for (aligns, 0..) |al, i| {
+                const cell = try self.newNode(.table_cell);
+                cell.align_ = al;
+                cell.header = first;
+                cell.literal = if (i < cells.len) cells[i] else "";
+                row.appendChild(cell);
+            }
+            table.appendChild(row);
+            first = false;
+        }
     }
 
     // ---- one line --------------------------------------------------------------------
 
     pub fn feed(self: *Parser, ln: []const u8) Allocator.Error!void {
+        if (self.ext.front_matter and self.fm_state != .done) {
+            if (try self.frontMatterLine(ln)) return;
+        }
+        try self.feedLine(ln);
+    }
+
+    fn feedLine(self: *Parser, ln: []const u8) Allocator.Error!void {
         self.oldtip = self.tip;
         self.line = ln;
         self.offset = 0;
@@ -649,7 +887,7 @@ pub const Parser = struct {
         while (!matched_leaf) {
             self.findNextNonspace();
             // Quick exit: a line that cannot start a block.
-            if (!self.indented and (self.next_nonspace >= self.line.len or !maybeSpecial(self.line[self.next_nonspace]))) {
+            if (!self.indented and (self.next_nonspace >= self.line.len or !self.maybeSpecial(self.line[self.next_nonspace]))) {
                 self.advanceNextNonspace();
                 break;
             }
@@ -702,13 +940,19 @@ pub const Parser = struct {
 
     /// Closes every open block and parses the inline content of the leaves.
     pub fn finish(self: *Parser) Allocator.Error!void {
+        if (self.fm_state == .inside) {
+            // No closing fence: it was not front matter after all.
+            self.fm_state = .done;
+            self.line_number = 0;
+            for (self.fm_lines.items) |l| try self.feedLine(l);
+        }
         var t: ?*Node = self.tip;
         while (t) |n| {
             const parent = n.parent;
             if (n.build.open) try self.finalize(n);
             t = parent;
         }
-        try inl.processTree(self.a, self.doc, &self.refs);
+        try inl.processTree(self.a, self.doc, &self.refs, &self.footnotes, self.ext);
     }
 };
 

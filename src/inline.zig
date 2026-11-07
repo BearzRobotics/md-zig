@@ -9,6 +9,8 @@ const ast = @import("ast.zig");
 const text = @import("text.zig");
 const scan = @import("scan.zig");
 const unicode = @import("unicode.zig");
+const opts = @import("options.zig");
+const autolink = @import("autolink.zig");
 const Node = ast.Node;
 
 pub const Ref = struct { destination: []const u8, title: []const u8 };
@@ -38,6 +40,8 @@ const Bracket = struct {
 const Inl = struct {
     a: Allocator,
     refs: *const RefMap,
+    ext: opts.Extensions = .{},
+    footnotes: ?*const std.StringHashMapUnmanaged(*Node) = null,
     subject: []const u8,
     pos: usize = 0,
     delims: ?*Delim = null,
@@ -73,6 +77,7 @@ const Inl = struct {
             '\\' => try self.parseBackslash(block),
             '`' => try self.parseBackticks(block),
             '*', '_' => try self.handleDelim(c, block),
+            '~' => if (self.ext.strikethrough) try self.handleDelim(c, block) else try self.parseString(block),
             '[' => try self.parseOpenBracket(block),
             '!' => try self.parseBang(block),
             ']' => try self.parseCloseBracket(block),
@@ -88,7 +93,11 @@ const Inl = struct {
 
     fn parseString(self: *Inl, block: *Node) Allocator.Error!bool {
         const start = self.pos;
-        while (self.pos < self.subject.len and std.mem.findScalar(u8, "\n`[]\\!<&*_", self.subject[self.pos]) == null) self.pos += 1;
+        while (self.pos < self.subject.len) {
+            const c = self.subject[self.pos];
+            if (std.mem.findScalar(u8, "\n`[]\\!<&*_~", c) != null and (c != '~' or self.ext.strikethrough)) break;
+            self.pos += 1;
+        }
         if (self.pos == start) return false;
         block.appendChild(try self.newText(self.subject[start..self.pos]));
         return true;
@@ -237,7 +246,9 @@ const Inl = struct {
         self.pos += res.num;
         const node = try self.newText(self.subject[start..self.pos]);
         block.appendChild(node);
-        if (res.can_open or res.can_close) {
+        // Strikethrough uses runs of one or two tildes only.
+        const usable = cc != '~' or res.num <= 2;
+        if (usable and (res.can_open or res.can_close)) {
             const d = try self.a.create(Delim);
             d.* = .{
                 .cc = cc,
@@ -268,7 +279,7 @@ const Inl = struct {
 
     fn processEmphasis(self: *Inl, stack_bottom: ?*Delim) Allocator.Error!void {
         // Per kind of closer, how far down openers were already searched in vain.
-        var openers_bottom: [12]?*Delim = @splat(stack_bottom);
+        var openers_bottom: [13]?*Delim = @splat(stack_bottom);
 
         var closer = self.delims;
         while (closer != null and closer.?.prev != stack_bottom) closer = closer.?.prev;
@@ -276,6 +287,10 @@ const Inl = struct {
         while (closer) |cl| {
             if (!cl.can_close) {
                 closer = cl.next;
+                continue;
+            }
+            if (cl.cc == '~') {
+                closer = try self.closeStrikethrough(cl, stack_bottom, &openers_bottom[12]);
                 continue;
             }
             // Closers of different kinds, openness and length mod 3 can match
@@ -336,6 +351,40 @@ const Inl = struct {
         while (self.delims != null and self.delims != stack_bottom) self.removeDelimiter(self.delims.?);
     }
 
+    /// Matches a `~` closer with an opener of the same length. Returns the
+    /// delimiter to continue with.
+    fn closeStrikethrough(self: *Inl, cl: *Delim, stack_bottom: ?*Delim, bottom: *?*Delim) Allocator.Error!?*Delim {
+        var opener = cl.prev;
+        while (opener != null and opener != stack_bottom and opener != bottom.*) : (opener = opener.?.prev) {
+            const op = opener.?;
+            if (op.cc == '~' and op.can_open and op.num == cl.num) break;
+        } else {
+            // Nothing to match: remember where the search failed.
+            bottom.* = cl.prev;
+            const next = cl.next;
+            if (!cl.can_open) self.removeDelimiter(cl);
+            return next;
+        }
+        const op = opener.?;
+        const del = try self.newNode(.strikethrough);
+        var tmp = op.node.next;
+        while (tmp) |t| {
+            if (t == cl.node) break;
+            const next = t.next;
+            t.unlink();
+            del.appendChild(t);
+            tmp = next;
+        }
+        op.node.insertAfter(del);
+        removeDelimitersBetween(op, cl);
+        op.node.unlink();
+        cl.node.unlink();
+        self.removeDelimiter(op);
+        const next = cl.next;
+        self.removeDelimiter(cl);
+        return next;
+    }
+
     // ---- links and images --------------------------------------------------------------
 
     fn addBracket(self: *Inl, node: *Node, index: usize, image: bool) Allocator.Error!void {
@@ -357,6 +406,11 @@ const Inl = struct {
     fn parseBang(self: *Inl, block: *Node) Allocator.Error!bool {
         const start = self.pos;
         self.pos += 1;
+        // With footnotes, `![^x]` is a "!" followed by a footnote reference.
+        if (self.ext.footnotes and self.peek() == '[' and self.pos + 1 < self.subject.len and self.subject[self.pos + 1] == '^') {
+            block.appendChild(try self.newText("!"));
+            return true;
+        }
         if (self.peek() == '[') {
             self.pos += 1;
             const node = try self.newText("![");
@@ -484,8 +538,20 @@ const Inl = struct {
         var title: ?[]const u8 = null;
         var matched = false;
 
+        // A footnote reference: [^label] with a matching definition.
+        var footnote_key: ?[]const u8 = null;
+        if (self.ext.footnotes and !is_image and self.footnotes != null) {
+            const inner = self.subject[opener.index + 1 .. start - 1];
+            if (inner.len > 1 and inner[0] == '^' and std.mem.findAny(u8, inner, " \t\n[]") == null) {
+                const key = try text.normalizeLabel(self.a, inner[1..]);
+                if (self.footnotes.?.contains(key)) footnote_key = key;
+            }
+        }
+
         // An inline link: ( destination "title" )
-        if (self.peek() == '(') {
+        if (footnote_key != null) {
+            matched = true;
+        } else if (self.peek() == '(') {
             self.pos += 1;
             self.spnl();
             if (try self.parseLinkDestination()) |d| {
@@ -502,7 +568,7 @@ const Inl = struct {
             if (!matched) self.pos = save;
         }
 
-        if (!matched) {
+        if (!matched and footnote_key == null) {
             // A reference link: [text][label], [text][] or [text].
             const before_label = self.pos;
             const n = self.parseLinkLabel();
@@ -527,8 +593,8 @@ const Inl = struct {
         }
 
         if (matched) {
-            const node = try self.newNode(if (is_image) .image else .link);
-            node.literal = dest orelse "";
+            const node = try self.newNode(if (footnote_key != null) .footnote_ref else if (is_image) .image else .link);
+            node.literal = footnote_key orelse (dest orelse "");
             node.title = title orelse "";
             var tmp = opener.node.next;
             while (tmp) |t| {
@@ -612,17 +678,31 @@ fn atLineEnd(p: *Inl) bool {
     return false;
 }
 
-/// Parses the inline content of every paragraph and heading below `root`.
-pub fn processTree(a: Allocator, root: *Node, refs: *const RefMap) Allocator.Error!void {
+/// Parses the inline content of every paragraph, heading and table cell below
+/// `root`.
+pub fn processTree(
+    a: Allocator,
+    root: *Node,
+    refs: *const RefMap,
+    footnotes: *const std.StringHashMapUnmanaged(*Node),
+    ext: opts.Extensions,
+) Allocator.Error!void {
     var walker = ast.Walker.init(root);
     while (walker.next()) |ev| {
         if (!ev.entering) continue;
         switch (ev.node.kind) {
-            .paragraph, .heading => {
+            .paragraph, .heading, .table_cell => {
                 const node = ev.node;
-                var p: Inl = .{ .a = a, .refs = refs, .subject = std.mem.trim(u8, node.literal, " \t\n\r\x0b\x0c") };
+                var p: Inl = .{
+                    .a = a,
+                    .refs = refs,
+                    .ext = ext,
+                    .footnotes = footnotes,
+                    .subject = std.mem.trim(u8, node.literal, " \t\n\r\x0b\x0c"),
+                };
                 node.literal = "";
                 try p.parseAll(node);
+                if (ext.autolinks) try autolink.process(a, node);
             },
             else => {},
         }
