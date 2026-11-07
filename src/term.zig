@@ -260,7 +260,10 @@ const Renderer = struct {
         var col: usize = 0; // columns used after the prefix
         var line_open = false;
         var space = false;
-        for (tokens) |t| switch (t) {
+        // True while the next word touches the one before it (no space token
+        // between), as in "`code`)": such words wrap together, never apart.
+        var glued = false;
+        for (tokens, 0..) |t, idx| switch (t) {
             .style => |s| {
                 const delta: u16 = 1;
                 const ptr: *u16 = switch (s.field) {
@@ -275,16 +278,20 @@ const Renderer = struct {
                 if (s.on) ptr.* += delta else ptr.* -|= delta;
                 if (line_open) try self.sgr();
             },
-            .space => space = line_open,
+            .space => {
+                space = line_open;
+                glued = false;
+            },
             .hard_break => {
                 if (line_open) try self.endLine();
                 line_open = false;
                 space = false;
+                glued = false;
                 col = 0;
             },
             .word => |word| {
                 const ww = unicode.stringWidth(word);
-                if (line_open and col + 1 + ww > avail) {
+                if (!glued and line_open and col + 1 + gluedWidth(tokens, idx) > avail) {
                     try self.endLine();
                     line_open = false;
                     space = false;
@@ -300,12 +307,25 @@ const Renderer = struct {
                     col += 1;
                 }
                 space = false;
+                glued = true;
                 try self.w.writeAll(word);
                 col += ww;
             },
         };
         if (line_open) try self.endLine();
         _ = base;
+    }
+
+    /// Width of the run of words that starts at `tokens[from]` and is not
+    /// interrupted by a space or a line break (style changes do not interrupt it).
+    fn gluedWidth(tokens: []const Token, from: usize) usize {
+        var w: usize = 0;
+        for (tokens[from..]) |t| switch (t) {
+            .word => |word| w += unicode.stringWidth(word),
+            .style => {},
+            else => break,
+        };
+        return w;
     }
 
     fn endLine(self: *Renderer) Error!void {

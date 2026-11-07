@@ -76,3 +76,15 @@ test "a table wider than the terminal wraps inside its cells" {
     try testing.expect(std.mem.find(u8, out, "one two") != null);
     try testing.expect(std.mem.find(u8, out, "eight") != null);
 }
+
+test "words that touch are not split across lines" {
+    const gpa = std.testing.allocator;
+    var doc = try md.Document.parse(gpa, "aaaa bbbb (`cc`) dd\n", .{});
+    defer doc.deinit();
+    // Width 12: "aaaa bbbb" fits, "(`cc`)" does not fit on the same line, and
+    // the closing parenthesis must stay with `cc`.
+    const out = try doc.toTextAlloc(gpa, .{ .width = 12 });
+    defer gpa.free(out);
+    try std.testing.expect(std.mem.find(u8, out, "\n)") == null);
+    try std.testing.expect(std.mem.find(u8, out, "(`cc`)") != null);
+}
