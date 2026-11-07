@@ -79,12 +79,11 @@ test "a table wider than the terminal wraps inside its cells" {
 
 test "words that touch are not split across lines" {
     const gpa = std.testing.allocator;
-    var doc = try md.Document.parse(gpa, "aaaa bbbb (`cc`) dd\n", .{});
+    var doc = try md.Document.parse(gpa, "aaaaaaaaaaaaaaaaaaa `cc`) dd\n", .{});
     defer doc.deinit();
-    // Width 12: "aaaa bbbb" fits, "(`cc`)" does not fit on the same line, and
-    // the closing parenthesis must stay with `cc`.
-    const out = try doc.toTextAlloc(gpa, .{ .width = 12 });
+    // Width 24: "aaaaaaaaaaaaaaaaaaa `cc`" would fit, but the closing parenthesis
+    // touches the code span, so the whole "`cc`)" moves to the next line.
+    const out = try doc.toTextAlloc(gpa, .{ .width = 24 });
     defer gpa.free(out);
-    try std.testing.expect(std.mem.find(u8, out, "\n)") == null);
-    try std.testing.expect(std.mem.find(u8, out, "(`cc`)") != null);
+    try std.testing.expectEqualStrings("aaaaaaaaaaaaaaaaaaa\n`cc`) dd\n", out);
 }
