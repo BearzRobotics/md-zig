@@ -123,3 +123,57 @@ test "extensions behave through a one-byte reader as well" {
     try std.testing.expect(std.mem.find(u8, got, "<del>2</del>") != null);
     try std.testing.expect(std.mem.find(u8, got, "footnote-ref") != null);
 }
+
+fn expectDl(src: []const u8, want: []const u8) !void {
+    const gpa = std.testing.allocator;
+    const out = try renderWith(gpa, src, .{ .definition_lists = true });
+    defer gpa.free(out);
+    try std.testing.expectEqualStrings(want, out);
+}
+
+test "definition lists" {
+    try expectDl("Apple\n: A fruit\n: Also a company\n", "<dl>\n<dt>Apple</dt>\n<dd>A fruit</dd>\n<dd>Also a company</dd>\n</dl>\n");
+    // Every line of the paragraph is a term; inlines work in terms and definitions.
+    try expectDl("a\n*b*\n: x `y`\n", "<dl>\n<dt>a</dt>\n<dt><em>b</em></dt>\n<dd>x <code>y</code></dd>\n</dl>\n");
+    // Without a blank line, the next line continues the definition lazily.
+    try expectDl("A\n: 1\nB\n: 2\n", "<dl>\n<dt>A</dt>\n<dd>1\nB</dd>\n<dd>2</dd>\n</dl>\n");
+    // Terms after a blank line stay in the same list.
+    try expectDl("A\n: 1\n\nB\n: 2\n", "<dl>\n<dt>A</dt>\n<dd>\n<p>1</p>\n</dd>\n<dt>B</dt>\n<dd>\n<p>2</p>\n</dd>\n</dl>\n");
+    // Indented continuation makes more blocks in a definition.
+    try expectDl("T\n: one\n\n    two\n", "<dl>\n<dt>T</dt>\n<dd>\n<p>one</p>\n<p>two</p>\n</dd>\n</dl>\n");
+    // A colon without a space, or without a term, is text.
+    try expectDl("a\n:b\n", "<p>a\n:b</p>\n");
+    try expectDl(": x\n", "<p>: x</p>\n");
+    // Text after the list is a paragraph again.
+    try expectDl("T\n: d\n\nafter\n", "<dl>\n<dt>T</dt>\n<dd>d</dd>\n</dl>\n<p>after</p>\n");
+}
+
+test "definition lists are off by default" {
+    const gpa = std.testing.allocator;
+    const out = try renderWith(gpa, "T\n: d\n", .{});
+    defer gpa.free(out);
+    try std.testing.expectEqualStrings("<p>T\n: d</p>\n", out);
+}
+
+test "definition lists nest, mix with other blocks and do not leak" {
+    const gpa = std.testing.allocator;
+    const srcs = [_][]const u8{
+        "A\n: B\n  C\n  : nested def\n",
+        "- T\n  : in an item\n",
+        "> T\n> : in a quote\n",
+        "T\n:\ttab\n: \n:  \n",
+        "T\n: d\n\n\n\nU\n: e\n\n: f\n",
+        "[x]: /u\n: d\n",
+        "T\n: ```\n  code\n  ```\n",
+        "T\n:     indented code?\n",
+        ": : :\n:\n",
+    };
+    for (srcs) |src| {
+        const out = try renderWith(gpa, src, md.Extensions.all);
+        gpa.free(out);
+        var doc = try md.Document.parse(gpa, src, .{ .extensions = md.Extensions.all });
+        defer doc.deinit();
+        const t = try doc.toTextAlloc(gpa, .{ .width = 40 });
+        gpa.free(t);
+    }
+}

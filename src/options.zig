@@ -18,6 +18,8 @@ pub const Extensions = packed struct {
     footnotes: bool = false,
     /// A `---` ... `---` block at the very start is kept apart as front matter.
     front_matter: bool = false,
+    /// `Term` followed by lines that start with `: definition`.
+    definition_lists: bool = false,
 
     pub const gfm: Extensions = .{ .tables = true, .strikethrough = true, .task_lists = true, .autolinks = true, .tagfilter = true };
     /// Everything this library supports.
@@ -29,6 +31,7 @@ pub const Extensions = packed struct {
         .tagfilter = true,
         .footnotes = true,
         .front_matter = true,
+        .definition_lists = true,
     };
 };
 

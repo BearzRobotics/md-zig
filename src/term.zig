@@ -341,7 +341,7 @@ const Renderer = struct {
             .paragraph => {
                 try self.beginBlock();
                 try self.paragraphText(n);
-                const tight = if (n.parent) |p| (p.kind == .item and p.parent != null and p.parent.?.list.tight) else false;
+                const tight = if (n.parent) |p| ((p.kind == .item or p.kind == .deflist_def) and p.parent != null and p.parent.?.list.tight) else false;
                 if (!tight) self.endBlock();
             },
             .heading => {
@@ -401,9 +401,41 @@ const Renderer = struct {
                 self.endBlock();
             },
             .list => try self.list(n),
+            .deflist => try self.deflist(n),
             .table => try self.table(n),
             else => {},
         }
+    }
+
+    /// Terms in bold on their own line, definitions indented below them.
+    fn deflist(self: *Renderer, n: *Node) Error!void {
+        try self.beginBlock();
+        var child = n.first_child;
+        while (child) |c| : (child = c.next) {
+            switch (c.kind) {
+                .deflist_term => {
+                    // Terms after the first are set off from the definitions above.
+                    if (c.prev != null and c.prev.?.kind == .deflist_def) self.need_blank = true;
+                    try self.beginBlock();
+                    var tokens: std.ArrayList(Token) = .empty;
+                    defer tokens.deinit(self.a);
+                    if (self.o.color) try tokens.append(self.a, .{ .style = .{ .field = .bold, .on = true } });
+                    try self.inlines(c, &tokens, 0);
+                    if (self.o.color) try tokens.append(self.a, .{ .style = .{ .field = .bold, .on = false } });
+                    try self.flow(tokens.items);
+                    self.need_blank = !n.list.tight and c.next != null and c.next.?.kind == .deflist_term;
+                },
+                .deflist_def => {
+                    try self.prefixes.append(self.a, .{ .cont = "    " });
+                    self.need_blank = false;
+                    try self.children(c);
+                    _ = self.prefixes.pop();
+                    self.need_blank = !n.list.tight and c.next != null and c.next.?.kind == .deflist_def;
+                },
+                else => {},
+            }
+        }
+        self.endBlock();
     }
 
     fn list(self: *Renderer, n: *Node) Error!void {

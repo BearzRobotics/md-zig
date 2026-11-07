@@ -691,7 +691,7 @@ pub fn processTree(
     while (walker.next()) |ev| {
         if (!ev.entering) continue;
         switch (ev.node.kind) {
-            .paragraph, .heading, .table_cell => {
+            .paragraph, .heading, .table_cell, .deflist_term => {
                 const node = ev.node;
                 var p: Inl = .{
                     .a = a,

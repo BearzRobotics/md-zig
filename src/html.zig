@@ -277,7 +277,7 @@ const Renderer = struct {
                     try self.lit(self.backrefs);
                 }
                 // In a tight list the paragraph's tags are left out.
-                if (n.parent) |p| if (p.parent) |g| if (g.kind == .list and g.list.tight) return;
+                if (n.parent) |p| if (p.parent) |g| if ((g.kind == .list or g.kind == .deflist) and g.list.tight) return;
                 if (entering) {
                     try self.cr();
                     try self.open("p");
@@ -338,6 +338,29 @@ const Renderer = struct {
                 }
             } else {
                 try self.close("li");
+                try self.cr();
+            },
+            .deflist => {
+                if (entering) {
+                    try self.cr();
+                    try self.lit("<dl>\n");
+                } else {
+                    try self.cr();
+                    try self.lit("</dl>\n");
+                }
+            },
+            .deflist_term => if (entering) {
+                try self.cr();
+                try self.open("dt");
+            } else {
+                try self.close("dt");
+                try self.cr();
+            },
+            .deflist_def => if (entering) {
+                try self.cr();
+                try self.open("dd");
+            } else {
+                try self.close("dd");
                 try self.cr();
             },
             .code_block => {

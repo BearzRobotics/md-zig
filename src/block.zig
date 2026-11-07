@@ -132,8 +132,9 @@ pub const Parser = struct {
 
     fn canContain(parent: ast.Kind, child: ast.Kind) bool {
         return switch (parent) {
-            .document, .block_quote, .item, .footnote_def => child != .item,
+            .document, .block_quote, .item, .footnote_def, .deflist_def => child != .item and child != .deflist_def,
             .list => child == .item,
+            .deflist => child == .deflist_def,
             else => false,
         };
     }
@@ -166,7 +167,7 @@ pub const Parser = struct {
         var block = start;
         while (block) |b| {
             if (b.build.last_line_blank) return true;
-            if (!b.build.last_line_checked and (b.kind == .list or b.kind == .item)) {
+            if (!b.build.last_line_checked and (b.kind == .list or b.kind == .item or b.kind == .deflist or b.kind == .deflist_def)) {
                 b.build.last_line_checked = true;
                 block = b.last_child;
             } else {
@@ -237,6 +238,28 @@ pub const Parser = struct {
                     }
                 }
             },
+            .deflist => {
+                var def = block.first_child;
+                while (def) |d| : (def = d.next) {
+                    if (d.kind != .deflist_def) continue;
+                    if (endsWithBlankLine(d) and d.next != null) {
+                        block.list.tight = false;
+                        break;
+                    }
+                    var sub = d.first_child;
+                    var loose = false;
+                    while (sub) |s| : (sub = s.next) {
+                        if (endsWithBlankLine(s) and (d.next != null or s.next != null)) {
+                            loose = true;
+                            break;
+                        }
+                    }
+                    if (loose) {
+                        block.list.tight = false;
+                        break;
+                    }
+                }
+            },
             else => {},
         }
         self.tip = above orelse self.doc;
@@ -248,7 +271,7 @@ pub const Parser = struct {
 
     fn continueBlock(self: *Parser, container: *Node) Allocator.Error!Continue {
         switch (container.kind) {
-            .document, .list => return .matched,
+            .document, .list, .deflist => return .matched,
             .block_quote => {
                 if (!self.indented and self.at(self.next_nonspace) == '>') {
                     self.advanceNextNonspace();
@@ -258,7 +281,7 @@ pub const Parser = struct {
                 }
                 return .not_matched;
             },
-            .item => {
+            .item, .deflist_def => {
                 if (self.blank) {
                     // A blank line after an empty item ends it.
                     if (container.first_child == null) return .not_matched;
@@ -325,16 +348,17 @@ pub const Parser = struct {
             2 => return self.startFencedCode(),
             3 => return self.startHtmlBlock(container),
             4 => return self.startFootnoteDef(),
-            5 => return self.startTable(container),
-            6 => return self.startSetextHeading(container),
-            7 => return self.startThematicBreak(),
-            8 => return self.startListItem(container),
-            9 => return self.startIndentedCode(),
+            5 => return self.startDefinition(container),
+            6 => return self.startTable(container),
+            7 => return self.startSetextHeading(container),
+            8 => return self.startThematicBreak(),
+            9 => return self.startListItem(container),
+            10 => return self.startIndentedCode(),
             else => unreachable,
         }
     }
 
-    const block_start_count = 10;
+    const block_start_count = 11;
 
     fn startBlockQuote(self: *Parser) Allocator.Error!u8 {
         if (self.indented or self.at(self.next_nonspace) != '>') return 0;
@@ -643,6 +667,7 @@ pub const Parser = struct {
     fn maybeSpecial(self: *const Parser, c: u8) bool {
         if (std.mem.findScalar(u8, "#`~*+_=<>-", c) != null or std.ascii.isDigit(c)) return true;
         if (self.ext.tables and (c == '|' or c == ':')) return true;
+        if (self.ext.definition_lists and c == ':') return true;
         return self.ext.footnotes and c == '[';
     }
 
@@ -700,6 +725,71 @@ pub const Parser = struct {
         }
         if (openingFence(rest) != null) return true;
         return false;
+    }
+
+    /// `: definition` after a paragraph (whose lines become the terms) or after
+    /// another definition of the same list.
+    fn startDefinition(self: *Parser, container: *Node) Allocator.Error!u8 {
+        if (!self.ext.definition_lists or self.indented) return 0;
+        const rest = self.line[self.next_nonspace..];
+        if (rest.len < 2 or rest[0] != ':' or !text.isSpaceOrTab(rest[1])) return 0;
+        if (container.kind != .paragraph and container.kind != .deflist) return 0;
+        // A paragraph that is only link reference definitions has no term.
+        if (container.kind == .paragraph and isBlank(container.build.content.items)) return 0;
+
+        const marker_offset = self.indent;
+        try self.closeUnmatchedBlocks();
+        var dl: *Node = container;
+        if (container.kind == .paragraph) {
+            const para = container;
+            const parent = para.parent.?;
+            const prev = para.prev;
+            para.unlink();
+            if (prev != null and prev.?.kind == .deflist) {
+                // Terms after a blank line join the list above.
+                dl = prev.?;
+                dl.build.open = true;
+                dl.build.last_line_checked = false;
+            } else {
+                dl = try self.newNode(.deflist);
+                dl.line = para.line;
+                dl.list.tight = true;
+                parent.appendChild(dl);
+            }
+            var lines = std.mem.splitScalar(u8, para.build.content.items, '\n');
+            var k: u32 = 0;
+            while (lines.next()) |l| : (k += 1) {
+                const term_text = std.mem.trim(u8, l, " \t");
+                if (term_text.len == 0) continue;
+                const t = try self.newNode(.deflist_term);
+                t.line = para.line + k;
+                t.literal = term_text;
+                t.build.open = false;
+                dl.appendChild(t);
+            }
+        }
+        self.tip = dl;
+
+        self.advanceNextNonspace();
+        self.advanceOffset(1, true);
+        const spaces_start_col = self.column;
+        const spaces_start_offset = self.offset;
+        while (true) {
+            self.advanceOffset(1, true);
+            if (!(self.column - spaces_start_col < 5 and text.isSpaceOrTab(self.at(self.offset)))) break;
+        }
+        const spaces_after = self.column - spaces_start_col;
+        var padding: usize = 1 + spaces_after;
+        if (spaces_after >= 5 or spaces_after < 1 or self.offset >= self.line.len) {
+            padding = 2;
+            self.column = spaces_start_col;
+            self.offset = spaces_start_offset;
+            if (text.isSpaceOrTab(self.at(self.offset))) self.advanceOffset(1, true);
+        }
+        const def = try self.addChild(.deflist_def);
+        def.list.padding = padding;
+        def.list.marker_offset = marker_offset;
+        return 1;
     }
 
     fn startFootnoteDef(self: *Parser) Allocator.Error!u8 {
@@ -919,7 +1009,7 @@ pub const Parser = struct {
             }
             const t = container.kind;
             const last_line_blank = self.blank and !(t == .block_quote or (t == .code_block and container.build.fenced) or
-                (t == .item and container.first_child == null and container.line == self.line_number));
+                ((t == .item or t == .deflist_def) and container.first_child == null and container.line == self.line_number));
             var cont: ?*Node = container;
             while (cont) |c| : (cont = c.parent) c.build.last_line_blank = last_line_blank;
 

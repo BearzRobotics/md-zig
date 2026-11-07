@@ -8,7 +8,7 @@
 | `root.zig` | Public API: `Document`, `Options`, `Extensions`; reads lines from the reader and feeds the block parser |
 | `options.zig` | `Options`, `Extensions` |
 | `ast.zig` | `Node`, `Kind`, and the iterative `Walker` |
-| `block.zig` | Block structure, line by line (quotes, lists, code, HTML, headings, tables, footnote definitions, front matter) |
+| `block.zig` | Block structure, line by line (quotes, lists, code, HTML, headings, tables, footnote definitions, definition lists, front matter) |
 | `inline.zig` | Emphasis, links, images, code spans, autolinks, entities, strikethrough, footnote references; link reference definitions |
 | `autolink.zig` | GFM extended autolinks over the text nodes of a finished leaf |
 | `scan.zig` | Hand-written matchers for the spec's regular expressions (raw HTML, autolinks) |

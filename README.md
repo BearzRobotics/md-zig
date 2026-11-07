@@ -5,7 +5,7 @@ Markdown parser and renderer for Zig, built on `std.Io`.
 - **CommonMark 0.31.2**: all 652 examples of the specification pass, byte for byte.
 - **Extensions** (flags in `Extensions`, all off by default): GFM tables,
   strikethrough, task lists, extended autolinks and the tag filter (52 of 52
-  examples of cmark-gfm's own suite pass), plus footnotes and front matter.
+  examples of cmark-gfm's own suite pass), plus footnotes, definition lists and front matter.
 - **Input** is a `*std.Io.Reader`, read one line at a time. **Output** goes to a
   `*std.Io.Writer`: HTML, or text for a terminal (word-wrapped, optional ANSI).
 - No file system or OS calls in the library; one module, no dependencies.
@@ -44,13 +44,14 @@ Try it: `zig build` then `zig-out/bin/mdcat FILE [WIDTH]`.
 | `autolinks` | bare `https://...`, `www....`, `user@example.com` |
 | `tagfilter` | `<script>` and a few other raw tags shown as text |
 | `footnotes` | `text[^1]` and `[^1]: the note` |
+| `definition_lists` | `Term` then `: definition` lines; every line above the first `:` is a term; indented lines continue a definition |
 | `front_matter` | a `---` ... `---` block at the very start, kept in the tree, not rendered |
 
 `Extensions.gfm` is the first five; `Extensions.all` is all of them.
 
 ## Not done
 
-- Definition lists (`Term` / `: definition`).
+- A blank line between a term and its `: definition` (the `:` line must follow the term directly).
 - Unicode: "punctuation" and "whitespace" for emphasis, and case folding of link
   labels, are approximated by ranges (no Unicode database in the standard
   library). Text outside those ranges is treated as letters. See

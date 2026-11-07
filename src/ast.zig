@@ -32,6 +32,13 @@ pub const Kind = enum {
     footnote_def,
     footnote_ref,
     front_matter,
+    /// Children are alternating `deflist_term` and `deflist_def` nodes.
+    /// `list.tight` tells whether definitions are written without paragraphs.
+    deflist,
+    /// One term (a line of text); its children are inlines.
+    deflist_term,
+    /// One definition; holds blocks, like an `item`.
+    deflist_def,
 };
 
 pub const Align = enum { none, left, center, right };
@@ -145,6 +152,7 @@ pub const Node = struct {
         return switch (self.kind) {
             .document, .block_quote, .list, .item, .paragraph, .heading, .emph, .strong, .link, .image => true,
             .strikethrough, .table, .table_row, .table_cell, .footnote_def => true,
+            .deflist, .deflist_term, .deflist_def => true,
             else => false,
         };
     }
