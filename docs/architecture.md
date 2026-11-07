@@ -25,7 +25,8 @@ man and mdoc pages, and dkman renders it. Node kinds and fields are therefore
 API. `Node.indent` is the one field Markdown never sets: readers of other
 formats use it to ask the terminal renderer for plain indentation of a
 `block_quote` (no bar) and for a `deflist_def` whose short term shares a line
-with its text.
+with its text. A `code_block` with `indent` set is indented by that amount
+instead of the default 4 (`Node.flush` for none).
 
 ## Data flow
 

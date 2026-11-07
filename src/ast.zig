@@ -86,10 +86,12 @@ pub const Node = struct {
     header: bool = false,
     /// Task list marker of an `item`.
     task: Task = .none,
-    /// Display indent hint in columns for `block_quote` and `deflist_def`. The
-    /// Markdown parser never sets it (0). Readers of other formats (man pages)
-    /// do: the terminal renderer then indents by this amount without a quote
-    /// bar, and puts a short definition term on the same line as its text.
+    /// Display indent hint in columns for `block_quote`, `deflist_def` and
+    /// `code_block`. The Markdown parser never sets it (0). Readers of other
+    /// formats (man pages) do: the terminal renderer then indents a quote by
+    /// this amount without a bar, puts a short definition term on the same line
+    /// as its text, and indents a code block by this amount instead of the
+    /// default 4 (`flush` means not at all).
     indent: u16 = 0,
 
     /// 1-based line on which the block starts (0 for inlines).
@@ -112,6 +114,9 @@ pub const Node = struct {
         /// Column alignments of a table being built.
         aligns: []const Align = &.{},
     };
+
+    /// `indent` value of a `code_block` that is written without any indent.
+    pub const flush: u16 = std.math.maxInt(u16);
 
     pub fn appendChild(self: *Node, child: *Node) void {
         child.unlink();

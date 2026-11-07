@@ -39,7 +39,7 @@ fn extensionsFromFlags(flags: u32) md.Extensions {
 const Handle = struct { doc: md.Document };
 
 export fn md_version() [*:0]const u8 {
-    return "0.2.0";
+    return "0.3.0";
 }
 
 export fn md_parse(src: ?[*]const u8, len: usize, extensions: u32, out: ?*?*Handle) c_int {

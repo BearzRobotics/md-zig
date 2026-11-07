@@ -401,7 +401,9 @@ const Renderer = struct {
                     if (line.len == 0 and lines.peek() == null) break;
                     try self.writePrefix(false);
                     if (self.o.color) try self.w.writeAll("\x1b[36m");
-                    try self.w.writeAll("    ");
+                    if (n.indent == 0) {
+                        try self.w.writeAll("    ");
+                    } else if (n.indent != Node.flush) try self.w.splatByteAll(' ', n.indent);
                     try self.w.writeAll(line);
                     if (self.o.color) try self.w.writeAll("\x1b[0m");
                     try self.w.writeAll("\n");

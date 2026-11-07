@@ -50,7 +50,7 @@ int main(void) {
     md_free_string(NULL, 0);
 
     md_free(doc);
-    CHECK(strcmp(md_version(), "0.2.0") == 0);
+    CHECK(strcmp(md_version(), "0.3.0") == 0);
     if (fails == 0) printf("c api ok\n");
     return fails ? 1 : 0;
 }

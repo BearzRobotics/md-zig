@@ -137,3 +137,21 @@ test "a quote with an indent hint is plain indentation" {
     defer gpa.free(out);
     try std.testing.expectEqualStrings("    quoted\n", out);
 }
+
+test "code block indent hint: default, custom, flush" {
+    const gpa = std.testing.allocator;
+    var doc = try md.Document.parse(gpa, "```\nx\n```\n", .{});
+    defer doc.deinit();
+    const code = doc.root.first_child.?;
+    const a = try doc.toTextAlloc(gpa, .{ .width = 30 });
+    defer gpa.free(a);
+    try std.testing.expectEqualStrings("    x\n", a);
+    code.indent = 2;
+    const b = try doc.toTextAlloc(gpa, .{ .width = 30 });
+    defer gpa.free(b);
+    try std.testing.expectEqualStrings("  x\n", b);
+    code.indent = md.Node.flush;
+    const c = try doc.toTextAlloc(gpa, .{ .width = 30 });
+    defer gpa.free(c);
+    try std.testing.expectEqualStrings("x\n", c);
+}
