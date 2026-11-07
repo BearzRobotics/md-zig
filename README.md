@@ -34,6 +34,23 @@ build their own output, such as a GTK viewer.
 
 Try it: `zig build` then `zig-out/bin/mdcat FILE [WIDTH]`.
 
+## C interface (experimental)
+
+An optional C adapter lives in `src/capi.zig` and `include/md.h`; the Zig API
+does not depend on it. `zig build c-api` installs `libmd.a`, `libmd.so` and
+`md.h`. It is **experimental and unstable**: no source or binary compatibility
+is promised between releases. `zig build test` builds and runs a C program
+(`test/c/smoke.c`) against it.
+
+```c
+md_document *doc;
+if (md_parse(src, len, MD_EXT_ALL, &doc) == MD_OK) {
+    uint8_t *html; size_t n;
+    if (md_to_html(doc, &html, &n) == MD_OK) { fwrite(html, 1, n, stdout); md_free_string(html, n); }
+    md_free(doc);
+}
+```
+
 ## Extensions
 
 | Flag | Syntax |
