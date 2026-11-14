@@ -16,7 +16,7 @@
 | `unicode.zig` | Punctuation/whitespace classes, UTF-8 helpers, display width |
 | `entities.zig` | Generated table of the 2125 named character references |
 | `html.zig` | HTML renderer (also footnote section, tag filter) |
-| `term.zig` | Terminal renderer (wrapping, lists, tables, ANSI) |
+| `term.zig` | Terminal renderer (wrapping, lists, tables, ANSI); `TextOptions.justify` pads wrapped lines to the margin, alternating which end gets the extra space |
 
 ## The tree as an interface
 

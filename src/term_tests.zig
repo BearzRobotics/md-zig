@@ -155,3 +155,67 @@ test "code block indent hint: default, custom, flush" {
     defer gpa.free(c);
     try std.testing.expectEqualStrings("x\n", c);
 }
+
+test "justify pads wrapped lines to the width and alternates the ends" {
+    const gpa = testing.allocator;
+    const src = "one two three four five six seven eight nine ten eleven twelve thirteen\n";
+    const out = try text(gpa, src, .{}, .{ .width = 26, .unicode = false, .justify = true });
+    defer gpa.free(out);
+    var lines = std.mem.splitScalar(u8, out, '\n');
+    var n: usize = 0;
+    var last: []const u8 = "";
+    var prev_double_at: ?usize = null;
+    while (lines.next()) |l| {
+        if (l.len == 0) continue;
+        last = l;
+        n += 1;
+        if (lines.peek() != null and lines.peek().?.len > 0) {
+            // Every line but the last is exactly as wide as the margin.
+            try testing.expectEqual(@as(usize, 26), l.len);
+            const at = std.mem.find(u8, l, "  ");
+            if (at != null and prev_double_at != null) {
+                // The extra space moved to the other end of the line.
+                try testing.expect((at.? < 13) != (prev_double_at.? < 13));
+            }
+            prev_double_at = at;
+        }
+    }
+    try testing.expect(n >= 3);
+    // The last line keeps single spaces.
+    try testing.expect(std.mem.find(u8, last, "  ") == null);
+}
+
+test "justify leaves hard breaks, code and tables alone, and is off by default" {
+    const gpa = testing.allocator;
+    const plain = try text(gpa, "aaa bbb ccc ddd eee fff ggg hhh\n", .{}, .{ .width = 24, .unicode = false });
+    defer gpa.free(plain);
+    try testing.expectEqualStrings("aaa bbb ccc ddd eee fff\nggg hhh\n", plain);
+    const hard = try text(gpa, "aa bb\\\ncc dd\n", .{}, .{ .width = 24, .unicode = false, .justify = true });
+    defer gpa.free(hard);
+    try testing.expectEqualStrings("aa bb\ncc dd\n", hard);
+    const code = try text(gpa, "    a  b  c\n", .{}, .{ .width = 24, .unicode = false, .justify = true });
+    defer gpa.free(code);
+    try testing.expectEqualStrings("    a  b  c\n", code);
+}
+
+test "justify keeps styles in the right place" {
+    const gpa = testing.allocator;
+    const src = "aaa **bold** ccc dddd eeeee\n";
+    const out = try text(gpa, src, .{}, .{ .width = 20, .color = true, .unicode = false, .justify = true });
+    defer gpa.free(out);
+    // Strip escapes: the first line is 16 columns wide.
+    var visible: std.ArrayList(u8) = .empty;
+    defer visible.deinit(gpa);
+    var i: usize = 0;
+    while (i < out.len) : (i += 1) {
+        if (out[i] == 0x1b) {
+            while (out[i] != 'm') i += 1;
+            continue;
+        }
+        try visible.append(gpa, out[i]);
+    }
+    const first = visible.items[0..std.mem.findScalar(u8, visible.items, '\n').?];
+    try testing.expectEqual(@as(usize, 20), first.len);
+    try testing.expect(std.mem.find(u8, out, "\x1b[1m") != null);
+    try testing.expect(std.mem.find(u8, out, "bold\x1b[0m") != null);
+}

@@ -26,6 +26,11 @@ pub const TextOptions = struct {
     unicode: bool = true,
     /// Show the address after the text of a link.
     show_urls: bool = true,
+    /// Pad the gaps between words so that wrapped lines end at the right
+    /// margin, as `nroff` does. The last line of a paragraph, and lines that
+    /// end in a hard break, keep their natural width. Which end of the line
+    /// gets the extra spaces alternates from one line to the next.
+    justify: bool = false,
 };
 
 /// Containers nested deeper than this are not drawn.
@@ -260,13 +265,56 @@ const Renderer = struct {
         }
     }
 
+    /// One piece of a line that is waiting to be written.
+    const LineItem = union(enum) {
+        word: []const u8,
+        /// A space between words, which justification may widen.
+        gap,
+        /// The style from here on.
+        style: Style,
+    };
+
+    /// Writes a buffered line under the current prefixes. `extra` spaces are
+    /// shared out among the gaps, the remainder going to the gaps at the left
+    /// end, or at the right end when `from_right` is set.
+    fn emitLine(self: *Renderer, items: []const LineItem, start: Style, extra: usize, from_right: bool) Error!void {
+        const now = self.style;
+        defer self.style = now;
+        try self.writePrefix(false);
+        self.style = start;
+        try self.sgr();
+        var gaps: usize = 0;
+        for (items) |it| {
+            if (it == .gap) gaps += 1;
+        }
+        const each = if (gaps > 0) extra / gaps else 0;
+        const rest = if (gaps > 0) extra % gaps else 0;
+        var k: usize = 0;
+        for (items) |it| switch (it) {
+            .word => |word| try self.w.writeAll(word),
+            .gap => {
+                const more: usize = if (from_right) @intFromBool(k >= gaps - rest) else @intFromBool(k < rest);
+                try self.w.splatByteAll(' ', 1 + each + more);
+                k += 1;
+            },
+            .style => |st| {
+                self.style = st;
+                try self.sgr();
+            },
+        };
+        try self.endLine();
+    }
+
     /// Writes tokens as wrapped lines under the current prefixes.
     fn flow(self: *Renderer, tokens: []const Token) Error!void {
         const avail = self.available();
-        const base = self.prefixWidth();
+        var line: std.ArrayList(LineItem) = .empty;
+        defer line.deinit(self.a);
+        var start: Style = self.style;
         var col: usize = 0; // columns used after the prefix
         var line_open = false;
         var space = false;
+        var from_right = false;
         // True while the next word touches the one before it (no space token
         // between), as in "`code`)": such words wrap together, never apart.
         var glued = false;
@@ -283,14 +331,15 @@ const Renderer = struct {
                     .dim => &self.style.dim,
                 };
                 if (s.on) ptr.* += delta else ptr.* -|= delta;
-                if (line_open) try self.sgr();
+                if (line_open) try line.append(self.a, .{ .style = self.style });
             },
             .space => {
                 space = line_open;
                 glued = false;
             },
             .hard_break => {
-                if (line_open) try self.endLine();
+                if (line_open) try self.emitLine(line.items, start, 0, false);
+                line.clearRetainingCapacity();
                 line_open = false;
                 space = false;
                 glued = false;
@@ -299,28 +348,29 @@ const Renderer = struct {
             .word => |word| {
                 const ww = unicode.stringWidth(word);
                 if (!glued and line_open and col + 1 + gluedWidth(tokens, idx) > avail) {
-                    try self.endLine();
+                    const extra = if (self.o.justify and self.o.width != 0 and avail > col) avail - col else 0;
+                    try self.emitLine(line.items, start, extra, from_right);
+                    from_right = !from_right;
+                    line.clearRetainingCapacity();
                     line_open = false;
                     space = false;
                     col = 0;
                 }
                 if (!line_open) {
-                    try self.writePrefix(false);
-                    try self.sgr();
+                    start = self.style;
                     line_open = true;
                     col = 0;
                 } else if (space) {
-                    try self.w.writeAll(" ");
+                    try line.append(self.a, .gap);
                     col += 1;
                 }
                 space = false;
                 glued = true;
-                try self.w.writeAll(word);
+                try line.append(self.a, .{ .word = word });
                 col += ww;
             },
         };
-        if (line_open) try self.endLine();
-        _ = base;
+        if (line_open) try self.emitLine(line.items, start, 0, false);
     }
 
     /// Width of the run of words that starts at `tokens[from]` and is not
@@ -563,6 +613,7 @@ const Renderer = struct {
             .used_index = self.used_index,
         };
         sub.o.width = width;
+        sub.o.justify = false;
         var tokens: std.ArrayList(Token) = .empty;
         defer tokens.deinit(self.a);
         try sub.inlines(cell, &tokens, 0);
