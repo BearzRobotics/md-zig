@@ -219,3 +219,14 @@ test "justify keeps styles in the right place" {
     try testing.expect(std.mem.find(u8, out, "\x1b[1m") != null);
     try testing.expect(std.mem.find(u8, out, "bold\x1b[0m") != null);
 }
+
+test "tight headings put the text directly under a section heading" {
+    const gpa = testing.allocator;
+    const src = "# Title\n\n## NAME\n\ntext\n\n## MORE\n\nother\n";
+    const out = try text(gpa, src, .{}, .{ .unicode = false, .tight_headings = true });
+    defer gpa.free(out);
+    try testing.expectEqualStrings("# Title\n\n## NAME\ntext\n\n## MORE\nother\n", out);
+    const normal = try text(gpa, src, .{}, .{ .unicode = false });
+    defer gpa.free(normal);
+    try testing.expectEqualStrings("# Title\n\n## NAME\n\ntext\n\n## MORE\n\nother\n", normal);
+}

@@ -31,6 +31,10 @@ pub const TextOptions = struct {
     /// end in a hard break, keep their natural width. Which end of the line
     /// gets the extra spaces alternates from one line to the next.
     justify: bool = false,
+    /// No blank line between a heading of level 2 or deeper and the text under
+    /// it, as in a man page (`NAME` directly above its paragraph). A level 1
+    /// heading, the page title, still has one.
+    tight_headings: bool = false,
 };
 
 /// Containers nested deeper than this are not drawn.
@@ -434,7 +438,7 @@ const Renderer = struct {
                 try self.inlines(n, &tokens, 0);
                 if (self.o.color) try tokens.append(self.a, .{ .style = .{ .field = .bold, .on = false } });
                 try self.flow(tokens.items);
-                self.endBlock();
+                if (!(self.o.tight_headings and n.level >= 2)) self.endBlock();
             },
             .thematic_break => {
                 try self.beginBlock();
