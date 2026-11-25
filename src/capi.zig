@@ -7,7 +7,8 @@
 const std = @import("std");
 const md = @import("md");
 
-const gpa = std.heap.smp_allocator;
+// Tests use the allocator that reports leaks.
+const gpa = if (@import("builtin").is_test) std.testing.allocator else std.heap.smp_allocator;
 
 const ok = 0;
 const err_invalid_argument = 1;
@@ -116,4 +117,29 @@ export fn md_to_text(doc: ?*const Handle, width: usize, color: c_int, out: ?*?[*
 export fn md_free_string(ptr: ?[*]u8, len: usize) void {
     const p = ptr orelse return;
     gpa.free(p[0..len]);
+}
+
+test "the C functions free what they allocate" {
+    const src = "# Hi *x* www.a.com\n";
+    var doc: ?*Handle = null;
+    try std.testing.expectEqual(@as(c_int, ok), md_parse(src, src.len, 0, &doc));
+    defer md_free(doc);
+    var out: ?[*]u8 = null;
+    var len: usize = 0;
+    try std.testing.expectEqual(@as(c_int, ok), md_to_html(doc, &out, &len));
+    md_free_string(out, len);
+    try std.testing.expectEqual(@as(c_int, ok), md_to_safe_html(doc, &out, &len));
+    md_free_string(out, len);
+    try std.testing.expectEqual(@as(c_int, ok), md_to_text(doc, 20, 1, &out, &len));
+    md_free_string(out, len);
+}
+
+test "each extension flag turns on its own extension" {
+    for (ext_bits, 0..) |bit, i| {
+        try std.testing.expectEqual(@as(u32, 1) << @intCast(i), bit[0]);
+        const e = extensionsFromFlags(bit[0]);
+        inline for (ext_bits) |other| {
+            try std.testing.expectEqual(std.mem.eql(u8, other[1], bit[1]), @field(e, other[1]));
+        }
+    }
 }

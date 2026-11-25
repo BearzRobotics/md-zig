@@ -60,6 +60,11 @@ pub fn build(b: *std.Build) void {
     c_api_step.dependOn(&b.addInstallArtifact(shared_lib, .{}).step);
     c_api_step.dependOn(&b.addInstallFileWithDir(b.path("include/md.h"), .header, "md.h").step);
 
+    test_step.dependOn(&b.addRunArtifact(b.addTest(.{ .root_module = capi_mod })).step);
+    // The shared library and the example must keep compiling.
+    test_step.dependOn(&shared_lib.step);
+    test_step.dependOn(&mdcat.step);
+
     // A C program that uses the static library: part of `zig build test`.
     const smoke = b.addExecutable(.{
         .name = "c-smoke",

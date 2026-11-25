@@ -62,10 +62,14 @@ test "very deep nesting is cut off, not a stack overflow" {
     var src: std.ArrayList(u8) = .empty;
     defer src.deinit(gpa);
     for (0..5000) |_| try src.append(gpa, '>');
-    try src.appendSlice(gpa, " x\n");
-    const out = try text(gpa, src.items, .{}, .{});
+    try src.appendSlice(gpa, " hidden\n\nafter\n");
+    const out = try text(gpa, src.items, .{}, .{ .unicode = false });
     defer gpa.free(out);
-    try testing.expect(out.len > 0);
+    // `max_depth` quote bars, then an ellipsis in place of the rest.
+    try testing.expectEqual(@as(usize, max_depth), std.mem.count(u8, out, ">"));
+    try testing.expect(std.mem.find(u8, out, "\u{2026}") != null);
+    try testing.expect(std.mem.find(u8, out, "hidden") == null);
+    try testing.expect(std.mem.endsWith(u8, out, "\nafter\n"));
 }
 
 test "a table wider than the terminal wraps inside its cells" {
@@ -186,7 +190,7 @@ test "justify pads wrapped lines to the width and alternates the ends" {
     try testing.expect(std.mem.find(u8, last, "  ") == null);
 }
 
-test "justify leaves hard breaks, code and tables alone, and is off by default" {
+test "justify leaves hard breaks and code alone, and is off by default" {
     const gpa = testing.allocator;
     const plain = try text(gpa, "aaa bbb ccc ddd eee fff ggg hhh\n", .{}, .{ .width = 24, .unicode = false });
     defer gpa.free(plain);
@@ -345,4 +349,76 @@ test "widths below the minimum are honoured" {
     const quoted = try text(gpa, "> > > one two three\n", .{}, .{ .width = 10, .unicode = false });
     defer gpa.free(quoted);
     try testing.expectEqualStrings("> > > one two\n> > > three\n", quoted);
+}
+
+fn expectText(src: []const u8, o: md.TextOptions, want: []const u8) !void {
+    const gpa = testing.allocator;
+    const out = try text(gpa, src, md.Extensions.all, o);
+    defer gpa.free(out);
+    try testing.expectEqualStrings(want, out);
+}
+
+test "ordered lists count up and line up" {
+    try expectText("9. a\n10. b\n11. c\n", .{}, " 9. a\n10. b\n11. c\n");
+    try expectText("3) a\n3) b\n", .{}, "3) a\n4) b\n");
+}
+
+test "task boxes, rules, HTML blocks and images are drawn" {
+    try expectText("- [x] a\n- [ ] b\n", .{ .unicode = false }, "- [x] a\n- [ ] b\n");
+    try expectText("a\n\n***\n\nb\n", .{ .width = 8, .unicode = false }, "a\n\n--------\n\nb\n");
+    try expectText("<div>\nkept\n</div>\n", .{}, "<div>\nkept\n</div>\n");
+    try expectText("![a *cat*](c.png)\n", .{}, "[image: a cat]\n");
+}
+
+test "link addresses can be left out" {
+    try expectText("[docs](https://x.org/d)\n", .{ .show_urls = false }, "docs\n");
+    try expectText("[docs](https://x.org/d)\n", .{}, "docs <https://x.org/d>\n");
+}
+
+test "unicode drawing characters" {
+    try expectText("| a | b |\n|-|-|\n| c | d |\n", .{},
+        \\┌───┬───┐
+        \\│ a │ b │
+        \\├───┼───┤
+        \\│ c │ d │
+        \\└───┴───┘
+        \\
+    );
+    try expectText("- a\n\n> q\n\n***\n", .{ .width = 4 }, "\u{2022} a\n\n\u{2502} q\n\n────\n");
+}
+
+test "table columns align left, centre and right" {
+    try expectText("| aaaaa | bbbbb | ccccc |\n|:-|:-:|-:|\n| x | y | z |\n", .{ .unicode = false },
+        \\+-------+-------+-------+
+        \\| aaaaa | bbbbb | ccccc |
+        \\+-------+-------+-------+
+        \\| x     |   y   |     z |
+        \\+-------+-------+-------+
+        \\
+    );
+}
+
+test "each style has its own escape sequence in colour" {
+    const gpa = testing.allocator;
+    for ([_][2][]const u8{
+        .{ "*w*\n", "\x1b[3mw" },
+        .{ "**w**\n", "\x1b[1mw" },
+        .{ "~~w~~\n", "\x1b[9mw" },
+        .{ "`w`\n", "\x1b[36mw" },
+        .{ "[w](u)\n", "\x1b[4m\x1b[34mw" },
+    }) |case| {
+        const out = try text(gpa, case[0], md.Extensions.gfm, .{ .color = true });
+        defer gpa.free(out);
+        try testing.expect(std.mem.find(u8, out, case[1]) != null);
+    }
+}
+
+test "justify does not pad the lines of a table cell" {
+    const gpa = testing.allocator;
+    const src = "| k | v |\n|-|-|\n| a | one two three four five six seven eight |\n";
+    const plain = try text(gpa, src, md.Extensions.gfm, .{ .width = 24, .unicode = false });
+    defer gpa.free(plain);
+    const justified = try text(gpa, src, md.Extensions.gfm, .{ .width = 24, .unicode = false, .justify = true });
+    defer gpa.free(justified);
+    try testing.expectEqualStrings(plain, justified);
 }
