@@ -36,9 +36,9 @@ pub const Extensions = packed struct {
 };
 
 pub const Options = struct {
-    /// Longest accepted input, in bytes.
+    /// Longest accepted input, in bytes, line endings included.
     max_bytes: usize = 64 * 1024 * 1024,
-    /// Longest accepted line, in bytes.
+    /// Longest accepted line, in bytes, not counting its ending.
     max_line_bytes: usize = 4 * 1024 * 1024,
     /// Most nodes the tree may have. This is what bounds memory: allow about
     /// 250 bytes for each (about 1 GB at the default). Ordinary text needs one

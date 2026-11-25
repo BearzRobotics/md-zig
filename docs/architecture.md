@@ -30,9 +30,9 @@ instead of the default 4 (`Node.flush` for none).
 
 ## Data flow
 
-1. `Document.parseReader` streams one line at a time out of the reader
-   (`streamDelimiterLimit`), handles `\r\n`, lone `\r` and NUL, and calls
-   `Parser.feed`.
+1. `Document.parseReader` reads one line at a time out of the reader
+   (`readLine`: the endings are `\n`, `\r\n` and a lone `\r`), replaces NUL, and
+   calls `Parser.feed`.
 2. The block parser follows the CommonMark appendix "A parsing strategy": match
    the open containers, try to start new blocks, add the rest of the line to the
    innermost open leaf. Leaf text is kept raw until the block closes.

@@ -302,3 +302,39 @@ test "the number of nodes is limited" {
     }
     try testing.expect(needed >= count and needed < 10 * count);
 }
+
+fn expectParse(src: []const u8, options: md.Options, want: ?md.ParseError) !void {
+    var doc = md.Document.parse(testing.allocator, src, options) catch |e| {
+        const wanted = want orelse return e;
+        if (wanted != e) return error.WrongError;
+        return;
+    };
+    doc.deinit();
+    try testing.expectEqual(@as(?md.ParseError, null), want);
+}
+
+test "the limits are inclusive and exact" {
+    for ([_][]const u8{ "abc", "abc\n", "abc\r", "abc\r\n", "ab\nc", "\n\n\n" }) |src| {
+        try expectParse(src, .{ .max_bytes = src.len }, null);
+        try expectParse(src, .{ .max_bytes = src.len - 1 }, error.InputTooLarge);
+    }
+    for ([_][]const u8{ "abc", "abc\n", "abc\r\n", "abc\rabc\r", "a\nabc\nab" }) |src| {
+        try expectParse(src, .{ .max_line_bytes = 3 }, null);
+        try expectParse(src, .{ .max_line_bytes = 2 }, error.LineTooLong);
+    }
+    try expectParse("", .{ .max_bytes = 0, .max_line_bytes = 0 }, null);
+}
+
+test "CRLF split across reads is one line ending" {
+    const gpa = testing.allocator;
+    const src = "a\r\nb\r\n\r\nc";
+    for ([_]usize{ 1, 2, 3 }) |chunk| {
+        var tr: TrickleReader = undefined;
+        tr.setup(src, chunk, chunk, null);
+        var doc = try md.Document.parseReader(gpa, &tr.interface, .{});
+        defer doc.deinit();
+        const got = try doc.toHtmlAlloc(gpa);
+        defer gpa.free(got);
+        try testing.expectEqualStrings("<p>a\nb</p>\n<p>c</p>\n", got);
+    }
+}

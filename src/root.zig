@@ -33,7 +33,7 @@ pub const ParseError = error{
     OutOfMemory,
     /// The reader failed; see the reader's own error for the cause.
     ReadFailed,
-    /// A line is longer than `Options.max_line_bytes`.
+    /// A line, without its ending, is longer than `Options.max_line_bytes`.
     LineTooLong,
     /// The input is longer than `Options.max_bytes`, or its tree would have
     /// more than `Options.max_nodes` nodes.
@@ -62,29 +62,18 @@ pub const Document = struct {
         // The document node is already made.
         parser.nodes.left = options.max_nodes -| 1;
 
-        var line: Io.Writer.Allocating = .init(gpa);
-        defer line.deinit();
+        var line: std.ArrayList(u8) = .empty;
+        defer line.deinit(gpa);
         var total: usize = 0;
         while (true) {
-            line.writer.end = 0;
-            _ = r.streamDelimiterLimit(&line.writer, '\n', .limited(options.max_line_bytes)) catch |err| switch (err) {
-                error.StreamTooLong => return error.LineTooLong,
-                error.WriteFailed => return error.OutOfMemory,
-                error.ReadFailed => return error.ReadFailed,
-            };
-            // The line ended at a newline, or the input ended.
-            const have_newline = if (r.peekByte()) |b| b == '\n' else |err| switch (err) {
-                error.EndOfStream => false,
-                error.ReadFailed => return error.ReadFailed,
-            };
-            if (have_newline) r.toss(1);
-            const text = line.written();
-            if (!have_newline and text.len == 0) break;
+            line.clearRetainingCapacity();
+            const end = try readLine(gpa, r, &line, options.max_line_bytes);
+            if (end == 0 and line.items.len == 0) break;
 
-            total += text.len + 1;
+            total +|= line.items.len + end;
             if (total > options.max_bytes) return error.InputTooLarge;
-            feedLine(&parser, arena.allocator(), text) catch |e| return parser.failure(e);
-            if (!have_newline) break;
+            feedLine(&parser, arena.allocator(), line.items) catch |e| return parser.failure(e);
+            if (end == 0) break;
         }
         parser.finish() catch |e| return parser.failure(e);
         return .{ .arena = arena, .root = parser.doc, .extensions = options.extensions, .footnotes = parser.footnotes };
@@ -146,23 +135,45 @@ pub const Document = struct {
     }
 };
 
-/// Hands one line (no line terminator) to the block parser. A trailing `\r`
-/// is dropped, a lone `\r` also ends a line, and NUL becomes U+FFFD.
-fn feedLine(parser: *block.Parser, a: Allocator, raw: []const u8) Allocator.Error!void {
-    var text = raw;
-    if (text.len > 0 and text[text.len - 1] == '\r') text = text[0 .. text.len - 1];
-    var parts = std.mem.splitScalar(u8, text, '\r');
-    while (parts.next()) |part| {
-        if (std.mem.findScalar(u8, part, 0) != null) {
-            var fixed: std.ArrayList(u8) = .empty;
-            for (part) |c| {
-                if (c == 0) try fixed.appendSlice(a, "\u{fffd}") else try fixed.append(a, c);
-            }
-            try parser.feed(fixed.items);
-        } else {
-            try parser.feed(part);
-        }
+/// Appends the next line of `r` to `line`, without its ending, which is `\n`,
+/// `\r\n` or a lone `\r`. Returns the bytes the ending took: 0 at the end of the
+/// input.
+fn readLine(gpa: Allocator, r: *Io.Reader, line: *std.ArrayList(u8), max: usize) ParseError!usize {
+    while (true) {
+        const buffered = r.peekGreedy(1) catch |err| switch (err) {
+            error.EndOfStream => return 0,
+            error.ReadFailed => return error.ReadFailed,
+        };
+        const found = std.mem.findAny(u8, buffered, "\r\n");
+        const part = buffered[0 .. found orelse buffered.len];
+        if (part.len > max - line.items.len) return error.LineTooLong;
+        try line.appendSlice(gpa, part);
+        const at = found orelse {
+            r.toss(part.len);
+            continue;
+        };
+        const first = buffered[at];
+        r.toss(at + 1);
+        if (first == '\n') return 1;
+        // A `\n` right after `\r` belongs to the same ending.
+        const next = r.peekByte() catch |err| switch (err) {
+            error.EndOfStream => return 1,
+            error.ReadFailed => return error.ReadFailed,
+        };
+        if (next != '\n') return 1;
+        r.toss(1);
+        return 2;
     }
+}
+
+/// Hands one line (no line ending) to the block parser. NUL becomes U+FFFD.
+fn feedLine(parser: *block.Parser, a: Allocator, line: []const u8) Allocator.Error!void {
+    if (std.mem.findScalar(u8, line, 0) == null) return parser.feed(line);
+    var fixed: std.ArrayList(u8) = .empty;
+    for (line) |c| {
+        if (c == 0) try fixed.appendSlice(a, "\u{fffd}") else try fixed.append(a, c);
+    }
+    try parser.feed(fixed.items);
 }
 
 test {
