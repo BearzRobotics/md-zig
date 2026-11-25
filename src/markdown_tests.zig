@@ -253,3 +253,10 @@ test "random input: every renderer finishes, and the writer round trip holds" {
         try expectSameHtml(&.{src.items}, ext);
     }
 }
+
+test "nested empty items, and indented HTML after a list" {
+    try expectSameHtml(&.{
+        "- - - [r]:]\n",  "* * * [r]:]\n",      "- * ]\n <script\n", "- *  ]\n    <div\n", "- *  ]\n    <div",
+        "*  ]\n <div>\n", "1.   a\n   <div>\n",
+    }, .{});
+}

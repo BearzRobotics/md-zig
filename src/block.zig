@@ -581,7 +581,7 @@ pub const Parser = struct {
 
     /// Whether `s` is a thematic break. When a character rules it out, its
     /// index is stored in `bad`.
-    fn isThematicBreak(s: []const u8, bad: *usize) bool {
+    pub fn isThematicBreak(s: []const u8, bad: *usize) bool {
         if (s.len == 0) return false;
         const c = s[0];
         if (c != '*' and c != '_' and c != '-') return false;

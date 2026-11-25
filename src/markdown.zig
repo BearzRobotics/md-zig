@@ -237,6 +237,13 @@ const Gen = struct {
             }
         }
 
+        // An indented HTML block after the list must stay outside it, so the
+        // items' text has to be indented further than the block is.
+        var indent_after: usize = 0;
+        if (n.next) |after| if (after.kind == .html_block) {
+            indent_after = after.literal.len - std.mem.trimStart(u8, after.literal, " ").len;
+        };
+
         var out: std.ArrayList(u8) = .empty;
         var number: u32 = ld.start;
         var item = n.first_child;
@@ -244,10 +251,16 @@ const Gen = struct {
         while (item) |it| : (item = it.next) {
             if (!first and !ld.tight) try out.append(self.a, '\n');
             first = false;
-            const marker: []const u8 = if (ld.kind == .bullet)
+            var marker: []const u8 = if (ld.kind == .bullet)
                 try std.fmt.allocPrint(self.a, "{c} ", .{bullet})
             else
                 try std.fmt.allocPrint(self.a, "{d}{c} ", .{ number, delim });
+            if (marker.len <= indent_after and indent_after < 4) {
+                const wider = try self.a.alloc(u8, indent_after + 1);
+                @memset(wider, ' ');
+                @memcpy(wider[0..marker.len], marker);
+                marker = wider;
+            }
             // A marker has at most nine digits; only the first number counts.
             if (number < 999_999_999) number += 1;
             var inner = try self.itemBody(it, ld.tight);
@@ -268,9 +281,13 @@ const Gen = struct {
                 try out.append(self.a, '\n');
                 continue;
             }
-            if (inner[0] == ' ') {
+            // Nested markers can add up to a thematic break (`- - -`).
+            const first_line = try std.mem.concat(self.a, u8, &.{ marker, inner[0 .. std.mem.findScalar(u8, inner, '\n') orelse inner.len] });
+            var unused: usize = 0;
+            if (inner[0] == ' ' or block_parser.isThematicBreak(first_line, &unused)) {
                 // Spaces after the marker would count as part of it, so an
-                // indented first line starts on the next one.
+                // indented first line starts on the next one. So does one that
+                // would turn the line into a rule.
                 try out.appendSlice(self.a, std.mem.trimEnd(u8, marker, " "));
                 try out.append(self.a, '\n');
                 try out.appendSlice(self.a, try self.prefixed(inner, pad, pad));
