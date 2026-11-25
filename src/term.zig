@@ -673,7 +673,10 @@ const Renderer = struct {
     /// reset at the end of each line.
     fn cellLines(self: *Renderer, cell: *Node, width: usize) Error![]const []const u8 {
         var buf: Io.Writer.Allocating = .init(self.a);
+        // A header cell is bold from the start. As part of the style it
+        // survives the resets that every line and style change begin with.
         var sub: Renderer = .{
+            .style = .{ .bold = @intFromBool(cell.header) },
             .w = &buf.writer,
             .a = self.a,
             .o = self.o,
@@ -787,9 +790,7 @@ const Renderer = struct {
                     };
                     try self.w.writeAll(" ");
                     try self.w.splatByteAll(' ', left);
-                    if (rn.header and self.o.color) try self.w.writeAll("\x1b[1m");
                     try self.w.writeAll(cell_text);
-                    if (rn.header and self.o.color) try self.w.writeAll("\x1b[0m");
                     try self.w.splatByteAll(' ', pad - left);
                     try self.w.writeAll(" ");
                     try self.w.writeAll(v);

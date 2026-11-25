@@ -309,3 +309,20 @@ test "a table with too many columns for the width still has a whole frame" {
     defer gpa.free(out);
     try expectFrame(out, null);
 }
+
+test "table headers are bold in colour, also after styles inside them end" {
+    const gpa = testing.allocator;
+    const out = try text(gpa, "| a *b* c |\n|-|\n| body |\n", md.Extensions.gfm, .{ .color = true, .unicode = false });
+    defer gpa.free(out);
+    var lines = std.mem.splitScalar(u8, out, '\n');
+    _ = lines.next();
+    const header = lines.next().?;
+    // The last style set before each of the words includes bold.
+    for ([_][]const u8{ "a", "b", "c" }) |word| {
+        const at = std.mem.findScalar(u8, header, word[0]).?;
+        const reset = std.mem.findLast(u8, header[0..at], "\x1b[0m").?;
+        try testing.expect(std.mem.find(u8, header[reset..at], "\x1b[1m") != null);
+    }
+    _ = lines.next();
+    try testing.expect(std.mem.find(u8, lines.next().?, "\x1b[1m") == null);
+}
