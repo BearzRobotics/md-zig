@@ -156,3 +156,13 @@ test "ordinary emphasis keeps its usual spelling" {
     defer std.testing.allocator.free(out);
     try std.testing.expectEqualStrings("_a_ **b** ~~c~~ d*e*f\n", out);
 }
+
+test "pipes anywhere in a table cell stay in the cell" {
+    try expectSameHtml(&.{
+        "| a |\n|-|\n| [x](u \"p\\|q\") |\n",
+        "| a |\n|-|\n| <i title=\"\\|\"> |\n",
+        "| a |\n|-|\n| ![\\|](u '\\|') |\n",
+        "| a |\n|-|\n| `x \\| y` \\| z \\\\\\| |\n",
+        "| a |\n|-|\n| *x\\|* [^\\|] |\n\n[^\\|]: n\n",
+    }, md.Extensions.all);
+}

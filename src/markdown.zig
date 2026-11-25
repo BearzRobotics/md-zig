@@ -266,7 +266,12 @@ const Gen = struct {
             var cell = r.first_child;
             while (cell) |c| : (cell = c.next) {
                 try out.append(self.a, ' ');
-                try out.appendSlice(self.a, try self.leaf(c, .cell));
+                // The table parser takes one backslash from before each pipe,
+                // so each gets one, wherever in the cell it is.
+                for (try self.leaf(c, .cell)) |byte| {
+                    if (byte == '|') try out.append(self.a, '\\');
+                    try out.append(self.a, byte);
+                }
                 try out.appendSlice(self.a, " |");
             }
             try out.append(self.a, '\n');
@@ -322,12 +327,12 @@ const Gen = struct {
         if (!hasEmphasis(parent)) return first;
         var footnotes: html.Footnotes = .empty;
         const want = try self.innerHtml(parent, &footnotes, true);
-        if (try self.readsAs(first, ctx, &footnotes, want)) return first;
+        if (try self.readsAs(first, &footnotes, want)) return first;
         defer self.spelling = .usual;
         for ([_]Spelling{ .stars, .underscores, .alternating, .tags }) |spelling| {
             self.spelling = spelling;
             const again = try self.inlines(parent, ctx);
-            if (try self.readsAs(again, ctx, &footnotes, want)) return again;
+            if (try self.readsAs(again, &footnotes, want)) return again;
         }
         return first;
     }
@@ -365,16 +370,9 @@ const Gen = struct {
     }
 
     /// Whether `written`, parsed as inline content, renders to `want`.
-    fn readsAs(self: *Gen, written: []const u8, ctx: Ctx, footnotes: *html.Footnotes, want: []const u8) Error!bool {
-        var content = written;
-        if (ctx == .cell) {
-            // The table parser takes the escape from a pipe first.
-            const copy = try self.a.alloc(u8, written.len);
-            const removed = std.mem.replace(u8, written, "\\|", "|", copy);
-            content = copy[0 .. written.len - removed];
-        }
+    fn readsAs(self: *Gen, written: []const u8, footnotes: *html.Footnotes, want: []const u8) Error!bool {
         const node = try self.a.create(Node);
-        node.* = .{ .kind = .paragraph, .literal = content };
+        node.* = .{ .kind = .paragraph, .literal = written };
         var refs: inl.RefMap = .empty;
         var nodes: ast.NodeBudget = .{ .left = std.math.maxInt(usize) };
         try inl.processTree(self.a, node, &refs, footnotes, self.ext, 0, &nodes);
@@ -545,7 +543,6 @@ const Gen = struct {
         try out.appendNTimes(self.a, '`', len);
         if (pad) try out.append(self.a, ' ');
         for (lit) |c| {
-            if (c == '|' and self.in_cell) try out.append(self.a, '\\');
             try out.append(self.a, c);
         }
         if (pad) try out.append(self.a, ' ');
@@ -618,7 +615,8 @@ const Gen = struct {
                 '&' => esc = std.ascii.isAlphanumeric(next) or next == '#',
                 '!' => esc = next == '[' or (i + 1 == s.len and after != null and (after.?.kind == .link or after.?.kind == .footnote_ref)),
                 '~' => esc = self.ext.strikethrough or at_start,
-                '|' => esc = self.ext.tables or self.in_cell,
+                // In a cell every pipe is escaped later, by `table`.
+                '|' => esc = self.ext.tables and !self.in_cell,
                 '#', '>', '-', '+', '=' => esc = at_start,
                 ':' => esc = at_start and self.ext.definition_lists,
                 '0'...'9' => {
