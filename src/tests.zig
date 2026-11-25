@@ -402,3 +402,10 @@ test "a footnote reference inside link text does not undo the link" {
     // As cmark-gfm does.
     try std.testing.expect(std.mem.startsWith(u8, out, "<p><a href=\"/url\">see <sup class=\"footnote-ref\">"));
 }
+
+test "a task box that is a definition list's only term stays the term" {
+    const gpa = std.testing.allocator;
+    const out = try renderWith(gpa, "- [ ]\n  : d\n", md.Extensions.all);
+    defer gpa.free(out);
+    try std.testing.expectEqualStrings("<ul>\n<li>\n<dl>\n<dt>[ ]</dt>\n<dd>d</dd>\n</dl>\n</li>\n</ul>\n", out);
+}

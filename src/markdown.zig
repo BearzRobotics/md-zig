@@ -550,7 +550,13 @@ const Gen = struct {
                     if (at_end) {
                         while (kept != 0 and std.mem.findScalar(u8, " \t\x0b\x0c", run.items[kept - 1]) != null) kept -= 1;
                     }
-                    try self.escape(&out, run.items[0..kept], last.next, bol);
+                    // `[^x]:` at the start of a line would define the footnote.
+                    var from: usize = 0;
+                    if (kept != 0 and run.items[0] == ':' and c.prev != null and c.prev.?.kind == .footnote_ref) {
+                        try out.appendSlice(self.a, "\\:");
+                        from = 1;
+                    }
+                    try self.escape(&out, run.items[from..kept], last.next, bol and from == 0);
                     for (run.items[kept..]) |ws| try out.print(self.a, "&#{d};", .{ws});
                     bol = false;
                     child = last.next;

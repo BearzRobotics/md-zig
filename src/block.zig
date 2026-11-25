@@ -798,7 +798,13 @@ pub const Parser = struct {
             const para = container;
             const parent = para.parent.?;
             const prev = para.prev;
-            if (self.ext.task_lists) terms = taskMarker(para, terms);
+            if (self.ext.task_lists) {
+                const after_box = taskMarker(para, terms);
+                // A box alone is the term, not a task: a definition has a term.
+                if (isBlank(after_box)) {
+                    parent.task = .none;
+                } else terms = after_box;
+            }
             para.unlink();
             if (prev != null and prev.?.kind == .deflist) {
                 // Terms after a blank line join the list above.
