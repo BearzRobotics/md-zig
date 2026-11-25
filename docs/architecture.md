@@ -54,7 +54,22 @@ table cells).
 
 ## Limits
 
-`Options.max_bytes` and `max_line_bytes` bound the input. Nesting of containers
-is bounded by the input size only; the parser and the HTML renderer are
-iterative. The terminal renderer recurses over blocks and over inlines and stops
-at 64 levels of each; deeper inline content is written as plain text.
+Input is treated as untrusted.
+
+| Cost | Bound |
+|---|---|
+| Input size | `Options.max_bytes`, `max_line_bytes` |
+| Tree memory | `Options.max_nodes` |
+| Cells added to short table rows | `Options.max_padded_cells`, for the whole document |
+| Text repeated by link references | the input size, at least `inline.min_ref_expansion` |
+| Parentheses in a link destination | `inline.max_paren_depth` |
+| Time | linear in the input for the constructs in `src/perf_tests.zig` |
+
+The nesting of containers is bounded by the input only; the parser and the HTML
+renderer do not recurse over it. The terminal renderer recurses over blocks and
+over inlines and stops at 64 levels of each; deeper inline content is written as
+plain text. The Markdown writer stops with `error.TooDeep` at 200 levels.
+
+For HTML from untrusted input, `html.Options.safe` leaves out raw HTML and
+empties addresses that can run script or read local files. For the terminal,
+control characters are always replaced.

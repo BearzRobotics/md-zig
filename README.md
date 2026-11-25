@@ -4,8 +4,11 @@ Markdown parser and renderer for Zig, built on `std.Io`.
 
 - **CommonMark 0.31.2**: all 652 examples of the specification pass, byte for byte.
 - **Extensions** (flags in `Extensions`, all off by default): GFM tables,
-  strikethrough, task lists, extended autolinks and the tag filter (52 of 52
-  examples of cmark-gfm's own suite pass), plus footnotes, definition lists and front matter.
+  strikethrough, task lists, extended autolinks and the tag filter, plus
+  footnotes, definition lists and front matter. Of 52 examples from cmark-gfm's
+  own suite, 51 give identical output; the other has no defined output and is
+  only parsed. Where md-zig and a specification differ, see
+  `docs/decisions/0004-spec-precedence.md`.
 - **Input** is a `*std.Io.Reader`, read one line at a time. **Output** goes to a
   `*std.Io.Writer`: HTML, or text for a terminal (word-wrapped, optional ANSI).
 - No file system or OS calls in the library; one module, no dependencies.
@@ -37,8 +40,14 @@ the safe mode, which leaves out raw HTML and empties `javascript:`, `vbscript:`,
 try doc.writeHtmlOptions(gpa, writer, .{ .safe = true });
 ```
 
-`Options` limit the input (`max_bytes`, `max_line_bytes`); a longer input fails
-with `error.InputTooLarge` or `error.LineTooLong`. The tree (`doc.root`,
+`Options` limit what input can cost: `max_bytes` and `max_line_bytes` bound the
+input, and `max_nodes` bounds the tree and so the memory (about 1 GB at the
+default). Past them parsing fails with `error.InputTooLarge` or
+`error.LineTooLong`. `max_padded_cells` bounds the empty cells added to short
+table rows, and link references may only add as many bytes as the input has (at
+least 100,000); past those two the text is not treated as a table row or link.
+
+The tree (`doc.root`,
 `md.Node`, walked iteratively with `md.Walker`) is public, for consumers that
 build their own output, such as a GTK viewer.
 
@@ -49,9 +58,11 @@ try doc.writeMarkdown(gpa, writer);          // or doc.toMarkdownAlloc(gpa)
 ```
 
 The output has the same meaning, not the same spelling: parsing it gives a tree
-that renders to the same HTML (checked on all 652 CommonMark and 52 GFM
-examples). Raw HTML, and so `<!-- comments -->`, and front matter are written
-back exactly as read. Headings come out ATX, code fenced, links inline (reference
+that renders to the same HTML (tested on the 652 CommonMark examples, the GFM
+examples and a set of harder cases). Raw HTML, and so `<!-- comments -->`, is
+written as read, and front matter keeps its body and fence lines. Where no
+Markdown spelling of some emphasis reads back correctly, it is written as
+`<em>`, `<strong>` or `<del>`. Headings come out ATX, code fenced, links inline (reference
 definitions are resolved and not written), emphasis as `_x_`/`**x**`. Nesting
 deeper than 200 fails with `error.TooDeep`.
 
@@ -83,7 +94,7 @@ if (md_parse(src, len, MD_EXT_ALL, &doc) == MD_OK) {
 | `strikethrough` | `~text~`, `~~text~~` |
 | `task_lists` | `- [ ] item`, `- [x] item` |
 | `autolinks` | bare `https://...`, `www....`, `user@example.com` |
-| `tagfilter` | `<script>` and a few other raw tags shown as text |
+| `tagfilter` | `<script>` and eight other raw tags shown as text (not a sanitiser) |
 | `footnotes` | `text[^1]` and `[^1]: the note` |
 | `definition_lists` | `Term` then `: definition` lines; every line above the first `:` is a term; indented lines continue a definition |
 | `front_matter` | a `---` ... `---` block at the very start, kept in the tree, not rendered |
@@ -93,7 +104,6 @@ if (md_parse(src, len, MD_EXT_ALL, &doc) == MD_OK) {
 ## Not done
 
 - The Markdown writer does not keep how a construct was spelled (setext vs ATX, `*` vs `_`, reference-style links, indented code, wrapping).
-
 - A blank line between a term and its `: definition` (the `:` line must follow the term directly).
 - The terminal renderer does not draw raw HTML (blocks are shown dimmed, inline
   HTML is dropped) and cuts off containers nested more than 64 deep.

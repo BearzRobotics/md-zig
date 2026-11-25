@@ -5,8 +5,9 @@
 //! construct was spelled. What is kept is the meaning (parsing the output gives
 //! a tree that renders to the same HTML) and everything that is stored
 //! verbatim, above all **raw HTML, and with it `<!-- comments -->`**, which are
-//! `html_block` and `html_inline` nodes and are written exactly as read. Front
-//! matter is also written back unchanged.
+//! `html_block` and `html_inline` nodes and are written as read (later lines of
+//! a tag that spans lines are indented). Front matter is written back with its
+//! body and its fence lines unchanged.
 //!
 //! What is normalised: headings are ATX (`# x`), code is fenced, emphasis is
 //! `_x_` (or `*x*` inside a word) and `**x**`, thematic breaks are `___`,

@@ -6,7 +6,10 @@
 //!
 //!     var doc = try md.Document.parse(gpa, "# Hello *world*\n", .{});
 //!     defer doc.deinit();
-//!     try doc.writeHtml(writer);
+//!     try doc.writeHtml(gpa, writer);
+//!
+//! `writeHtml` passes raw HTML and every link address through. For input that
+//! is not trusted, use `writeHtmlOptions` with `.safe = true`.
 
 const std = @import("std");
 const Io = std.Io;

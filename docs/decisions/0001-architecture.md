@@ -59,7 +59,5 @@ a C library, and `AGENTS.md` section 13 requires `std.Io` for portability.
 
 - Memory is proportional to the document, not to a copy of the source plus the
   document.
-- Conformance is measured, not claimed: `zig build test` runs every spec example
-  and reports the number that pass; known failures are listed in
-  `test/known-failures.txt` and the test fails if a listed example starts
-  passing or an unlisted one fails.
+- Conformance is measured, not claimed: `zig build test` runs every spec
+  example, reports the number that pass, and fails on any mismatch.
