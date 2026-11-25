@@ -329,3 +329,14 @@ test "a term after reference definitions keeps its line number; task boxes apply
     try std.testing.expectEqualSlices(u32, &.{ 1, 6 }, &lines);
     try std.testing.expectEqual(@as(usize, 1), tasks);
 }
+
+test "references made inside footnotes get back-links" {
+    const gpa = std.testing.allocator;
+    for ([_][]const u8{ "a[^1] b[^2]\n\n[^1]: one\n\n[^2]: see[^1]\n", "a[^1]\n\n[^1]: self[^1]\n" }) |src| {
+        const out = try renderWith(gpa, src, .{ .footnotes = true });
+        defer gpa.free(out);
+        // The second reference to footnote 1 has a link back to it.
+        try std.testing.expect(std.mem.find(u8, out, "id=\"fnref-1-2\"") != null);
+        try std.testing.expect(std.mem.find(u8, out, "href=\"#fnref-1-2\" class=\"footnote-backref\"") != null);
+    }
+}

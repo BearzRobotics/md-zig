@@ -48,7 +48,14 @@ pub fn isDangerousUrl(url: []const u8) bool {
 }
 
 /// A footnote that is referenced, in order of first reference.
-const Used = struct { key: []const u8, def: *Node, refs: usize };
+const Used = struct {
+    key: []const u8,
+    def: *Node,
+    /// References written so far.
+    refs: usize,
+    /// References in the whole output, known before the section is written.
+    total: usize = 0,
+};
 
 const Renderer = struct {
     w: *Io.Writer,
@@ -149,20 +156,49 @@ const Renderer = struct {
         return std.fmt.bufPrint(buf, "-{d}", .{n}) catch "";
     }
 
-    fn footnoteRef(self: *Renderer, n: *Node) Error!void {
-        const def = self.defs.get(n.literal) orelse return;
-        const gop = try self.used_index.getOrPut(self.arena, n.literal);
+    /// The index in `used` of the footnote `key`, which is added on its first
+    /// use. Null when there is no such definition.
+    fn useFootnote(self: *Renderer, key: []const u8) Allocator.Error!?usize {
+        const def = self.defs.get(key) orelse return null;
+        const gop = try self.used_index.getOrPut(self.arena, key);
         if (!gop.found_existing) {
             gop.value_ptr.* = self.used.items.len;
-            try self.used.append(self.arena, .{ .key = n.literal, .def = def, .refs = 0 });
+            try self.used.append(self.arena, .{ .key = key, .def = def, .refs = 0 });
         }
-        const u = &self.used.items[gop.value_ptr.*];
+        return gop.value_ptr.*;
+    }
+
+    /// Counts the references made inside footnotes, in the order they will be
+    /// written, so that every footnote's back-links are known before any of
+    /// them is. References in the body have already been counted in `refs`.
+    fn countFootnoteRefs(self: *Renderer) Allocator.Error!void {
+        for (self.used.items) |*u| u.total = u.refs;
+        var i: usize = 0;
+        while (i < self.used.items.len) : (i += 1) {
+            const def = self.used.items[i].def;
+            var walker = ast.Walker.init(def);
+            var images: usize = 0;
+            while (walker.next()) |ev| {
+                if (ev.node.kind == .image) {
+                    if (ev.entering) images += 1 else images -= 1;
+                }
+                // As when writing: none are made inside an image description.
+                if (ev.node.kind != .footnote_ref or images > 0) continue;
+                const at = (try self.useFootnote(ev.node.literal)) orelse continue;
+                self.used.items[at].total += 1;
+            }
+        }
+    }
+
+    fn footnoteRef(self: *Renderer, n: *Node) Error!void {
+        const at = (try self.useFootnote(n.literal)) orelse return;
+        const u = &self.used.items[at];
         u.refs += 1;
         const key = try text.encodeUrl(self.arena, n.literal);
         var nb: [24]u8 = undefined;
         const suffix = firstRefSuffix(&nb, u.refs);
         var ib: [24]u8 = undefined;
-        const idx = std.fmt.bufPrint(&ib, "{d}", .{gop.value_ptr.* + 1}) catch unreachable;
+        const idx = std.fmt.bufPrint(&ib, "{d}", .{at + 1}) catch unreachable;
         try self.lit("<sup class=\"footnote-ref\"><a href=\"#fn-");
         try self.lit(key);
         try self.lit("\" id=\"fnref-");
@@ -176,6 +212,7 @@ const Renderer = struct {
     /// The `<section class="footnotes">` with every referenced footnote.
     fn footnotes(self: *Renderer) Error!void {
         if (self.used.items.len == 0) return;
+        try self.countFootnoteRefs();
         try self.cr();
         try self.lit("<section class=\"footnotes\" data-footnotes>\n<ol>\n");
         var i: usize = 0;
@@ -188,7 +225,7 @@ const Renderer = struct {
 
             var back: std.ArrayList(u8) = .empty;
             var k: usize = 1;
-            while (k <= u.refs) : (k += 1) {
+            while (k <= u.total) : (k += 1) {
                 if (k > 1) try back.append(self.arena, ' ');
                 var sb: [24]u8 = undefined;
                 const suffix = firstRefSuffix(&sb, k);
