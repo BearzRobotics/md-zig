@@ -63,7 +63,8 @@ An optional C adapter lives in `src/capi.zig` and `include/md.h`; the Zig API
 does not depend on it. `zig build c-api` installs `libmd.a`, `libmd.so` and
 `md.h`. It is **experimental and unstable**: no source or binary compatibility
 is promised between releases. `zig build test` builds and runs a C program
-(`test/c/smoke.c`) against it.
+(`test/c/smoke.c`) against it; `zig build test-cc` links the same program with
+the system `cc` against both libraries.
 
 ```c
 md_document *doc;

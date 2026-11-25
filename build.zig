@@ -41,8 +41,13 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
         .imports = &.{.{ .name = "md", .module = mod }},
+        // System C toolchains link position independent executables.
+        .pic = true,
     });
     const static_lib = b.addLibrary(.{ .name = "md", .linkage = .static, .root_module = capi_mod });
+    // The code calls helpers (such as __zig_probe_stack) that a C toolchain's
+    // runtime does not have.
+    static_lib.bundle_compiler_rt = true;
     const shared_lib = b.addLibrary(.{ .name = "md", .linkage = .dynamic, .root_module = capi_mod });
     const c_api_step = b.step("c-api", "Build the experimental C library and header");
     c_api_step.dependOn(&b.addInstallArtifact(static_lib, .{}).step);
@@ -58,4 +63,21 @@ pub fn build(b: *std.Build) void {
     smoke.root_module.addIncludePath(b.path("include"));
     smoke.root_module.linkLibrary(static_lib);
     test_step.dependOn(&b.addRunArtifact(smoke).step);
+
+    // The same program built by the system's C compiler against both installed
+    // libraries, which is how a C user links them. Needs `cc`.
+    const cc_step = b.step("test-cc", "Link the C smoke test with the system C compiler");
+    for ([_]*std.Build.Step.Compile{ static_lib, shared_lib }) |library| {
+        const cc = b.addSystemCommand(&.{ "cc", "-std=c11", "-Wall", "-Wextra", "-Werror" });
+        cc.addPrefixedDirectoryArg("-I", b.path("include"));
+        cc.addFileArg(b.path("test/c/smoke.c"));
+        cc.addArtifactArg(library);
+        // Lets the program built against the shared library find it.
+        cc.addPrefixedDirectoryArg("-Wl,-rpath,", library.getEmittedBinDirectory());
+        cc.addArg("-o");
+        const program = cc.addOutputFileArg("c-smoke-cc");
+        const run = std.Build.Step.Run.create(b, "run c-smoke-cc");
+        run.addFileArg(program);
+        cc_step.dependOn(&run.step);
+    }
 }
