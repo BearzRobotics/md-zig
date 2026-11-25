@@ -31,6 +31,7 @@ Every difference that is found is recorded in the table below.
 | Longest link label | CommonMark 6.3: "at most 999 characters inside the square brackets" | md-zig accepted 1000, as cmark 0.30.2 does | Follows the spec: 999 characters (not bytes). Differs from cmark. |
 | Tabs around link destinations and titles | CommonMark 4.7 and 6.3: spaces or tabs | only spaces were accepted | Follows the spec. |
 | What ends a table | GFM: the first empty line "or beginning of another block-level structure" | only quotes, headings and fences ended it | Follows the spec: also thematic breaks, list items, HTML blocks and indented code, matching cmark-gfm. Footnote definitions and `: ` lines, which the spec does not cover, stay rows (footnotes as in cmark-gfm). |
+| `~a b~~ c~` (an unmatched run of the other length between a pair) | GFM does not say | an audit suspected a bug | No change: md-zig already gives the same output as cmark-gfm. |
 
 ## Consequences
 
