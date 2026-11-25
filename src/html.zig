@@ -134,6 +134,7 @@ const Renderer = struct {
         try self.lit(">");
     }
 
+    /// Writes the tree below `root`, leaving out the footnote definitions in it.
     fn render(self: *Renderer, root: *Node) Error!void {
         var walker = ast.Walker.init(root);
         // Footnote definitions are written at the end, not where they stand.
@@ -143,6 +144,7 @@ const Renderer = struct {
                 if (ev.node == s and !ev.entering) skip = null;
                 continue;
             }
+            if (ev.node == root and root.kind == .footnote_def) continue;
             if (ev.node.kind == .footnote_def and ev.entering) {
                 skip = ev.node;
                 continue;
@@ -178,7 +180,16 @@ const Renderer = struct {
             const def = self.used.items[i].def;
             var walker = ast.Walker.init(def);
             var images: usize = 0;
+            var nested: ?*Node = null;
             while (walker.next()) |ev| {
+                if (nested) |skip| {
+                    if (ev.node == skip and !ev.entering) nested = null;
+                    continue;
+                }
+                if (ev.node.kind == .footnote_def and ev.node != def and ev.entering) {
+                    nested = ev.node;
+                    continue;
+                }
                 if (ev.node.kind == .image) {
                     if (ev.entering) images += 1 else images -= 1;
                 }
@@ -239,13 +250,13 @@ const Renderer = struct {
                 try back.appendSlice(self.arena, "</a>");
             }
             self.backrefs = back.items;
-            self.backref_para = if (u.def.last_child) |lc| (if (lc.kind == .paragraph) lc else null) else null;
+            // The back-links go in the last paragraph. A definition nested in
+            // this one is not part of its content.
+            var last = u.def.last_child;
+            while (last != null and last.?.kind == .footnote_def) last = last.?.prev;
+            self.backref_para = if (last) |l| (if (l.kind == .paragraph) l else null) else null;
 
-            var walker = ast.Walker.init(u.def);
-            while (walker.next()) |ev| {
-                if (ev.node == u.def) continue;
-                try self.node(ev.node, ev.entering);
-            }
+            try self.render(u.def);
             if (self.backref_para == null) {
                 try self.lit(self.backrefs);
                 try self.cr();

@@ -340,3 +340,17 @@ test "references made inside footnotes get back-links" {
         try std.testing.expect(std.mem.find(u8, out, "href=\"#fnref-1-2\" class=\"footnote-backref\"") != null);
     }
 }
+
+test "a footnote definition nested in another is not part of it" {
+    const gpa = std.testing.allocator;
+    // The output of cmark-gfm.
+    const out = try renderWith(gpa, "a[^1]\n\n[^1]: one\n\n    [^2]: two [^1]\n", .{ .footnotes = true });
+    defer gpa.free(out);
+    try std.testing.expect(std.mem.find(u8, out, "two") == null);
+    try std.testing.expect(std.mem.find(u8, out, "<p>one <a href=\"#fnref-1\"") != null);
+    try std.testing.expect(std.mem.find(u8, out, "fnref-1-2") == null);
+    // Referenced, it is a footnote like any other.
+    const used = try renderWith(gpa, "a[^1] b[^2]\n\n[^1]: one\n\n    [^2]: two\n", .{ .footnotes = true });
+    defer gpa.free(used);
+    try std.testing.expect(std.mem.find(u8, used, "<li id=\"fn-2\">\n<p>two ") != null);
+}
