@@ -260,3 +260,10 @@ test "nested empty items, and indented HTML after a list" {
         "*  ]\n <div>\n", "1.   a\n   <div>\n",
     }, .{});
 }
+
+test "empty nested items, bare task boxes, and indented HTML around definitions" {
+    try expectSameHtml(&.{
+        "0. ~\n\t* [r]:u\n", "- a\n  - [r]: /u\n", "+\n\n+ [ ] [r]:u\n",    "0.\n\n1. [x] [1]:=\n",
+        "`\n: \n <v>\n",     "t\n: \n   <v>\n",    "t\n:    d\n   <div>\n", "t\n: d\n  <div>\n",
+    }, md.Extensions.all);
+}

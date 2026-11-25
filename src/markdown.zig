@@ -244,6 +244,10 @@ const Gen = struct {
             indent_after = after.literal.len - std.mem.trimStart(u8, after.literal, " ").len;
         };
 
+        const tight_after_text = if (prev) |before| before.kind == .paragraph and
+            n.parent != null and (n.parent.?.kind == .item or n.parent.?.kind == .deflist_def) and
+            n.parent.?.parent != null and n.parent.?.parent.?.list.tight else false;
+
         var out: std.ArrayList(u8) = .empty;
         var number: u32 = ld.start;
         var item = n.first_child;
@@ -271,11 +275,17 @@ const Gen = struct {
                 // The box shares a line only with a paragraph's text.
                 const text_follows = if (it.first_child) |f| f.kind == .paragraph else false;
                 const between: []const u8 = if (text_follows) " " else "\n";
+                // Without a paragraph, a box alone would make an empty one. A
+                // link reference definition, which shows nothing, does not.
+                const alone = if (text_follows) box else try std.mem.concat(self.a, u8, &.{ box, " [//]: #" });
                 inner = if (inner.len == 0)
-                    try std.mem.concat(self.a, u8, &.{ box, "\n" })
+                    try std.mem.concat(self.a, u8, &.{ alone, "\n" })
                 else
-                    try std.mem.concat(self.a, u8, &.{ box, between, inner });
+                    try std.mem.concat(self.a, u8, &.{ alone, between, inner });
             }
+            // In a tight item, text may come straight before this list. An
+            // empty item cannot interrupt it, so it is given a definition.
+            if (inner.len == 0 and it == n.first_child and tight_after_text) inner = "[//]: #\n";
             if (inner.len == 0) {
                 try out.appendSlice(self.a, std.mem.trimEnd(u8, marker, " "));
                 try out.append(self.a, '\n');
@@ -318,8 +328,26 @@ const Gen = struct {
                 },
                 else => {
                     const inner = try self.blocks(c, n.list.tight);
-                    // An empty definition still needs the space after `:`.
-                    try out.appendSlice(self.a, if (inner.len == 0) ": \n" else try self.prefixed(inner, ": ", "  "));
+                    // As for list items: the text is indented further than an
+                    // HTML block that follows the list.
+                    var width: usize = 2;
+                    if (n.next) |after| if (after.kind == .html_block) {
+                        const indent = after.literal.len - std.mem.trimStart(u8, after.literal, " ").len;
+                        if (indent >= width and indent < 4) width = indent + 1;
+                    };
+                    const rest = try self.a.alloc(u8, width);
+                    @memset(rest, ' ');
+                    const marker = try std.mem.concat(self.a, u8, &.{ ":", rest[1..] });
+                    if (inner.len == 0) {
+                        // An empty definition still needs the space after `:`.
+                        try out.appendSlice(self.a, ": \n");
+                    } else if (inner[0] == ' ') {
+                        // Spaces after `:` would count as part of the marker.
+                        try out.appendSlice(self.a, ": \n");
+                        try out.appendSlice(self.a, try self.prefixed(inner, "  ", "  "));
+                    } else {
+                        try out.appendSlice(self.a, try self.prefixed(inner, marker, rest));
+                    }
                 },
             }
             prev = c.kind;
