@@ -275,3 +275,7 @@ test "a footnote reference followed by a colon stays a reference" {
 test "a task box before a term; emphasis around a tag that spans lines" {
     try expectSameHtml(&.{ "+ [ ] >\n  : \n", "- [x] T\n  : d\n", "*<!m\n->&#32;*\n", "**a <b\n> c** d*e*\n" }, md.Extensions.all);
 }
+
+test "an empty list right under a bare task box" {
+    try expectSameHtml(&.{"+ [ ] [1]:>\n  1. [r]:#\n"}, md.Extensions.all);
+}

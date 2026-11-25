@@ -289,7 +289,9 @@ const Gen = struct {
             }
             // In a tight item, text may come straight before this list. An
             // empty item cannot interrupt it, so it is given a definition.
-            if (inner.len == 0 and it == n.first_child and tight_after_text) inner = "[//]: #\n";
+            // So is one right after the line that stands in for a task box's text.
+            const after_box = prev == null and n.parent != null and n.parent.?.task != .none and self.ext.task_lists;
+            if (inner.len == 0 and it == n.first_child and (tight_after_text or after_box)) inner = "[//]: #\n";
             if (inner.len == 0) {
                 try out.appendSlice(self.a, std.mem.trimEnd(u8, marker, " "));
                 try out.append(self.a, '\n');

@@ -59,7 +59,9 @@ try doc.writeMarkdown(gpa, writer);          // or doc.toMarkdownAlloc(gpa)
 
 The output has the same meaning, not the same spelling: parsing it gives a tree
 that renders to the same HTML (tested on the 652 CommonMark examples, the GFM
-examples and a set of harder cases). Raw HTML, and so `<!-- comments -->`, is
+examples, harder cases and random input). Random testing still finds rare
+contrived exceptions, about one in a million inputs: an HTML block that starts
+with a tab inside a block quote, and some adjacent bare autolinks. Raw HTML, and so `<!-- comments -->`, is
 written as read, and front matter keeps its body and fence lines. Where no
 Markdown spelling of some emphasis reads back correctly, it is written as
 `<em>`, `<strong>` or `<del>`. Headings come out ATX, code fenced, links inline (reference
