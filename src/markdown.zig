@@ -25,6 +25,7 @@ const ast = @import("ast.zig");
 const Node = ast.Node;
 const Kind = ast.Kind;
 const Extensions = @import("options.zig").Extensions;
+const unicode = @import("unicode.zig");
 
 pub const Error = Io.Writer.Error || Allocator.Error || error{TooDeep};
 
@@ -388,6 +389,11 @@ const Gen = struct {
         return out.items;
     }
 
+    /// A letter, as the emphasis rules see it (the test `inline.zig` makes).
+    fn isWordChar(cp: u21) bool {
+        return !unicode.isUnicodeWhitespace(cp) and !unicode.isUnicodePunct(cp);
+    }
+
     /// Is the emphasis `n` written next to a letter or digit? `_` would not
     /// open or close emphasis there.
     fn intraword(self: *Gen, n: *Node) bool {
@@ -396,11 +402,11 @@ const Gen = struct {
         if (n.first_child) |f| if (f.kind == .emph or f.kind == .strong) return true;
         if (n.last_child) |l| if (l.kind == .emph or l.kind == .strong) return true;
         if (n.prev) |p| {
-            if (p.kind == .text and p.literal.len != 0 and std.ascii.isAlphanumeric(p.literal[p.literal.len - 1])) return true;
+            if (p.kind == .text and p.literal.len != 0 and isWordChar(unicode.decodeBefore(p.literal, p.literal.len))) return true;
             if (p.kind == .code or p.kind == .emph or p.kind == .strong) return true;
         }
         if (n.next) |nx| {
-            if (nx.kind == .text and nx.literal.len != 0 and std.ascii.isAlphanumeric(nx.literal[0])) return true;
+            if (nx.kind == .text and nx.literal.len != 0 and isWordChar(unicode.decodeAt(nx.literal, 0).cp)) return true;
             if (nx.kind == .code or nx.kind == .emph or nx.kind == .strong) return true;
         }
         return false;
@@ -499,7 +505,8 @@ const Gen = struct {
                 },
                 '\\', '`', '*', '[', ']', '<' => esc = true,
                 '_' => {
-                    // Inside a word `_` cannot open or close emphasis.
+                    // Inside a word `_` cannot open or close emphasis. (Only
+                    // ASCII is relied on here: elsewhere it is escaped.)
                     const prev_alnum = if (i > 0) std.ascii.isAlphanumeric(s[i - 1]) else false;
                     const next_alnum = std.ascii.isAlphanumeric(next);
                     esc = !(prev_alnum and next_alnum);

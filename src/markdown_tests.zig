@@ -124,3 +124,21 @@ test "nesting that is too deep fails cleanly" {
     defer doc.deinit();
     try std.testing.expectError(error.TooDeep, doc.toMarkdownAlloc(gpa));
 }
+
+fn expectSameHtml(srcs: []const []const u8, ext: md.Extensions) !void {
+    const gpa = std.testing.allocator;
+    for (srcs) |src| {
+        const r = try roundTrip(gpa, src, ext);
+        defer gpa.free(r.before);
+        defer gpa.free(r.after);
+        defer gpa.free(r.text);
+        std.testing.expectEqualStrings(r.before, r.after) catch |e| {
+            std.debug.print("source:\n{s}\nwritten:\n{s}\n", .{ src, r.text });
+            return e;
+        };
+    }
+}
+
+test "emphasis next to letters outside ASCII" {
+    try expectSameHtml(&.{ "*x*\u{e9}\n", "\u{e9}*x*\n", "\u{41f}\u{440}\u{438}*x*\n", "caf\u{e9}*s* and *n\u{e9}*e\n", "\u{65e5}**\u{672c}**\u{8a9e}\n" }, .{});
+}
