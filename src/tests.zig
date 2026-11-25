@@ -50,20 +50,32 @@ test "GFM and footnote examples (cmark-gfm test suite)" {
     defer parsed.deinit();
 
     var failed: usize = 0;
+    var compared: usize = 0;
+    var unchecked: usize = 0;
     for (parsed.value) |ex| {
-        var doc = try md.Document.parse(gpa, ex.markdown, .{ .extensions = md.Extensions.all });
-        defer doc.deinit();
-        const out = try doc.toHtmlAlloc(gpa);
-        defer gpa.free(out);
-        // One upstream example only checks that the parser does not crash.
-        if (std.mem.eql(u8, ex.html, "<IGNORE>\n")) continue;
-        if (!std.mem.eql(u8, out, ex.html)) {
-            failed += 1;
-            std.debug.print("gfm example {d} ({s}) fails\n--- markdown\n{s}--- expected\n{s}--- got\n{s}\n", .{ ex.example, ex.section, ex.markdown, ex.html, out });
+        // The footnote examples need more than the GFM preset; all the others
+        // must pass with exactly what `Extensions.gfm` turns on.
+        var ext = md.Extensions.gfm;
+        ext.footnotes = std.mem.find(u8, ex.markdown, "[^") != null;
+        for ([_]md.Extensions{ ext, md.Extensions.all }) |with| {
+            const out = try renderWith(gpa, ex.markdown, with);
+            defer gpa.free(out);
+            // One upstream example only checks that the parser does not crash.
+            if (std.mem.eql(u8, ex.html, "<IGNORE>\n")) {
+                unchecked += 1;
+                continue;
+            }
+            compared += 1;
+            if (!std.mem.eql(u8, out, ex.html)) {
+                failed += 1;
+                std.debug.print("gfm example {d} ({s}) fails\n--- markdown\n{s}--- expected\n{s}--- got\n{s}\n", .{ ex.example, ex.section, ex.markdown, ex.html, out });
+            }
         }
     }
-    std.debug.print("gfm: {d} of {d} examples pass\n", .{ parsed.value.len - failed, parsed.value.len });
+    std.debug.print("gfm: {d} of {d} comparisons pass; {d} runs without a defined output\n", .{ compared - failed, compared, unchecked });
     try std.testing.expectEqual(@as(usize, 0), failed);
+    // A change to the fixture must not silently reduce what is compared.
+    try std.testing.expectEqual(@as(usize, 2 * 51), compared);
 }
 
 fn renderWith(gpa: std.mem.Allocator, source: []const u8, ext: md.Extensions) ![]u8 {
@@ -155,27 +167,18 @@ test "definition lists are off by default" {
     try std.testing.expectEqualStrings("<p>T\n: d</p>\n", out);
 }
 
-test "definition lists nest, mix with other blocks and do not leak" {
-    const gpa = std.testing.allocator;
-    const srcs = [_][]const u8{
-        "A\n: B\n  C\n  : nested def\n",
-        "- T\n  : in an item\n",
-        "> T\n> : in a quote\n",
-        "T\n:\ttab\n: \n:  \n",
-        "T\n: d\n\n\n\nU\n: e\n\n: f\n",
-        "[x]: /u\n: d\n",
-        "T\n: ```\n  code\n  ```\n",
-        "T\n:     indented code?\n",
-        ": : :\n:\n",
-    };
-    for (srcs) |src| {
-        const out = try renderWith(gpa, src, md.Extensions.all);
-        gpa.free(out);
-        var doc = try md.Document.parse(gpa, src, .{ .extensions = md.Extensions.all });
-        defer doc.deinit();
-        const t = try doc.toTextAlloc(gpa, .{ .width = 40 });
-        gpa.free(t);
-    }
+test "definition lists nest and mix with other blocks" {
+    for ([_][2][]const u8{
+        .{ "A\n: B\n  C\n  : nested def\n", "<dl>\n<dt>A</dt>\n<dd>\n<dl>\n<dt>B</dt>\n<dt>C</dt>\n<dd>nested def</dd>\n</dl>\n</dd>\n</dl>\n" },
+        .{ "- T\n  : in an item\n", "<ul>\n<li>\n<dl>\n<dt>T</dt>\n<dd>in an item</dd>\n</dl>\n</li>\n</ul>\n" },
+        .{ "> T\n> : in a quote\n", "<blockquote>\n<dl>\n<dt>T</dt>\n<dd>in a quote</dd>\n</dl>\n</blockquote>\n" },
+        .{ "T\n:\ttab\n", "<dl>\n<dt>T</dt>\n<dd>tab</dd>\n</dl>\n" },
+        .{ "T\n: d\n\n\n\nU\n: e\n\n: f\n", "<dl>\n<dt>T</dt>\n<dd>\n<p>d</p>\n</dd>\n<dt>U</dt>\n<dd>\n<p>e</p>\n</dd>\n<dd>\n<p>f</p>\n</dd>\n</dl>\n" },
+        .{ "[x]: /u\n: d\n", "<p>: d</p>\n" },
+        .{ "T\n: ```\n  code\n  ```\n", "<dl>\n<dt>T</dt>\n<dd>\n<pre><code>code\n</code></pre>\n</dd>\n</dl>\n" },
+        .{ "T\n:     indented code?\n", "<dl>\n<dt>T</dt>\n<dd>\n<pre><code>indented code?\n</code></pre>\n</dd>\n</dl>\n" },
+        .{ ": : :\n:\n", "<p>: : :\n:</p>\n" },
+    }) |case| try expectDl(case[0], case[1]);
 }
 
 test "parentheses in a link destination are limited to 32 levels" {

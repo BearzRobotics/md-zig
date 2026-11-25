@@ -20,7 +20,7 @@ fn roundTrip(gpa: std.mem.Allocator, src: []const u8, ext: md.Extensions) !struc
     return .{ .before = before, .after = after, .text = text };
 }
 
-fn run(comptime json: []const u8, ext: md.Extensions, name: []const u8, allowed_failures: usize) !void {
+fn run(comptime json: []const u8, ext: md.Extensions, name: []const u8) !void {
     const gpa = std.testing.allocator;
     var parsed = try std.json.parseFromSlice([]Example, gpa, json, .{ .ignore_unknown_fields = true });
     defer parsed.deinit();
@@ -37,15 +37,15 @@ fn run(comptime json: []const u8, ext: md.Extensions, name: []const u8, allowed_
         }
     }
     std.debug.print("{s}: {d} of {d} examples round-trip\n", .{ name, parsed.value.len - failed, parsed.value.len });
-    try std.testing.expect(failed <= allowed_failures);
+    try std.testing.expectEqual(@as(usize, 0), failed);
 }
 
 test "writer round trip: CommonMark 0.31.2 examples" {
-    try run(@embedFile("spec-0.31.2.json"), .{}, "spec", 0);
+    try run(@embedFile("spec-0.31.2.json"), .{}, "spec");
 }
 
 test "writer round trip: GFM and footnote examples" {
-    try run(@embedFile("gfm-extensions.json"), md.Extensions.all, "gfm", 0);
+    try run(@embedFile("gfm-extensions.json"), md.Extensions.all, "gfm");
 }
 
 fn written(src: []const u8, ext: md.Extensions) ![]u8 {
@@ -221,4 +221,35 @@ test "tags spanning lines, indented blocks in items and tags in later terms" {
 
 test "a footnote reference inside link text survives writing" {
     try expectSameHtml(&.{"[see [^1] here](/url)\n\n[^1]: n\n"}, md.Extensions.all);
+}
+
+/// Pieces of Markdown syntax; strung together at random they reach
+/// combinations nobody writes a test for.
+const fragments = [_][]const u8{
+    "a",     "b",       " ",        "  ",  "\n",  "\n",        "\n\n",       "\t",     "    ", "*",    "**",     "_",
+    "~",     "~~",      "`",        "```", "~~~", "#",         "# ",         "> ",     "- ",   "* ",   "+ ",     "1. ",
+    "2) ",   "0. ",     "[",        "]",   "(",   ")",         "<",          ">",      "!",    "\\",   "&",      ";",
+    "&amp;", "&#10;",   "&#32;",    "|",   "---", "===",       "***",        ":",      ": ",   "[^1]", "[^1]: ", "[x] ",
+    "[ ] ",  "[r]: /u", "[r]",      "\"",  "'",   "www.a.com", "http://x.y", "a@b.co", "<!--", "-->",  "<div>",  "</div>",
+    "<a>",   "<br/>",   "<script>", ".",   "=",   "-",         "%",          "\u{e9}", "{",
+};
+
+test "random input: every renderer finishes, and the writer round trip holds" {
+    const gpa = std.testing.allocator;
+    // A fixed seed: the same inputs on every run.
+    var prng = std.Random.DefaultPrng.init(12345);
+    const random = prng.random();
+    const extensions = [_]md.Extensions{ .{}, md.Extensions.gfm, md.Extensions.all };
+    var src: std.ArrayList(u8) = .empty;
+    defer src.deinit(gpa);
+    for (0..4000) |i| {
+        src.clearRetainingCapacity();
+        for (0..random.intRangeAtMost(usize, 1, 14)) |_| try src.appendSlice(gpa, fragments[random.uintLessThan(usize, fragments.len)]);
+        const ext = extensions[i % extensions.len];
+        var doc = try md.Document.parse(gpa, src.items, .{ .extensions = ext });
+        defer doc.deinit();
+        const shown = try doc.toTextAlloc(gpa, .{ .width = random.uintLessThan(usize, 40), .color = random.boolean(), .justify = random.boolean() });
+        gpa.free(shown);
+        try expectSameHtml(&.{src.items}, ext);
+    }
 }

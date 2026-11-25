@@ -354,3 +354,18 @@ test "a byte order mark is skipped at the start only" {
         try testing.expectEqualStrings(case[1], got);
     }
 }
+
+/// Parses and renders everything once, for the allocation failure test.
+fn everything(gpa: std.mem.Allocator) !void {
+    const src = "---\na: 1\n---\n# T *e* [l][r] &amp; <b> www.a.com a@b.com ~~s~~\n\n> - [x] q[^1]\n\n" ++
+        "| a | \\| |\n|:-|-:|\n| `c|` | ![i](u \"t\") |\n\nterm\n: def\n\n```z\ncode\n```\n\n[r]: /u 't'\n[^1]: note[^1]\n";
+    var doc = try md.Document.parse(gpa, src, .{ .extensions = md.Extensions.all });
+    defer doc.deinit();
+    gpa.free(try doc.toHtmlAlloc(gpa));
+    gpa.free(try doc.toTextAlloc(gpa, .{ .width = 30, .color = true }));
+    gpa.free(try doc.toMarkdownAlloc(gpa));
+}
+
+test "every allocation may fail without a leak or a crash" {
+    try testing.checkAllAllocationFailures(testing.allocator, everything, .{});
+}
