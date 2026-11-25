@@ -491,7 +491,7 @@ pub const Parser = struct {
     };
 
     /// Which kind (1 to 7) of HTML block starts at `s`, or 0.
-    fn htmlBlockKind(s: []const u8) u8 {
+    pub fn htmlBlockKind(s: []const u8) u8 {
         if (s.len == 0 or s[0] != '<') return 0;
         // 1: <script, <pre, <textarea, <style
         inline for (.{ "script", "pre", "textarea", "style" }) |name| {

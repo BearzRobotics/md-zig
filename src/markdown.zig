@@ -9,7 +9,7 @@
 //! matter is also written back unchanged.
 //!
 //! What is normalised: headings are ATX (`# x`), code is fenced, emphasis is
-//! `_x_` (or `*x*` inside a word) and `**x**`, thematic breaks are `***`,
+//! `_x_` (or `*x*` inside a word) and `**x**`, thematic breaks are `___`,
 //! bullets keep their character except that neighbouring lists alternate so
 //! they stay separate, links are inline (`[x](url "title")`; reference
 //! definitions are resolved and not written), tables are padded with single
@@ -31,6 +31,7 @@ const Extensions = @import("options.zig").Extensions;
 const unicode = @import("unicode.zig");
 const inl = @import("inline.zig");
 const html = @import("html.zig");
+const block_parser = @import("block.zig").Parser;
 
 pub const Error = Io.Writer.Error || Allocator.Error || error{TooDeep};
 
@@ -120,7 +121,8 @@ const Gen = struct {
                 }
                 return self.line(out.items);
             },
-            .thematic_break => return "***\n",
+            // `_` is never a list marker, so no marker before this can join it.
+            .thematic_break => return "___\n",
             .html_block => return self.line(n.literal),
             .front_matter => return try std.fmt.allocPrint(self.a, "---\n{s}---\n", .{n.literal}),
             .code_block => return self.codeBlock(n),
@@ -134,6 +136,7 @@ const Gen = struct {
             .footnote_def => {
                 const inner = try self.blocks(n, false);
                 const head = try std.fmt.allocPrint(self.a, "[^{s}]: ", .{n.literal});
+                if (inner.len == 0) return head;
                 return self.prefixed(inner, head, "    ");
             },
             .deflist => return self.deflist(n),
@@ -146,7 +149,12 @@ const Gen = struct {
     fn hasBreak(n: *Node) bool {
         var w = ast.Walker.init(n);
         while (w.next()) |ev| {
-            if (ev.entering and (ev.node.kind == .softbreak or ev.node.kind == .linebreak)) return true;
+            if (!ev.entering) continue;
+            switch (ev.node.kind) {
+                .softbreak, .linebreak => return true,
+                .html_inline => if (std.mem.findScalar(u8, ev.node.literal, '\n') != null) return true,
+                else => {},
+            }
         }
         return false;
     }
@@ -237,14 +245,20 @@ const Gen = struct {
             var inner = try self.itemBody(it, ld.tight);
             const pad = try self.a.alloc(u8, marker.len);
             @memset(pad, ' ');
+            if (it.task != .none and self.ext.task_lists) {
+                const box: []const u8 = if (it.task == .checked) "[x]" else "[ ]";
+                // The box shares a line only with a paragraph's text.
+                const text_follows = if (it.first_child) |f| f.kind == .paragraph else false;
+                const between: []const u8 = if (text_follows) " " else "\n";
+                inner = if (inner.len == 0)
+                    try std.mem.concat(self.a, u8, &.{ box, "\n" })
+                else
+                    try std.mem.concat(self.a, u8, &.{ box, between, inner });
+            }
             if (inner.len == 0) {
                 try out.appendSlice(self.a, std.mem.trimEnd(u8, marker, " "));
                 try out.append(self.a, '\n');
                 continue;
-            }
-            if (it.task != .none and self.ext.task_lists) {
-                const box: []const u8 = if (it.task == .checked) "[x] " else "[ ] ";
-                inner = try std.mem.concat(self.a, u8, &.{ box, inner });
             }
             try out.appendSlice(self.a, try self.prefixed(inner, marker, pad));
         }
@@ -271,7 +285,8 @@ const Gen = struct {
                 },
                 else => {
                     const inner = try self.blocks(c, n.list.tight);
-                    try out.appendSlice(self.a, try self.prefixed(inner, ": ", "  "));
+                    // An empty definition still needs the space after `:`.
+                    try out.appendSlice(self.a, if (inner.len == 0) ": \n" else try self.prefixed(inner, ": ", "  "));
                 },
             }
             prev = c.kind;
@@ -348,6 +363,34 @@ const Gen = struct {
     /// content with emphasis is read back, and spelled another way until it
     /// renders as the original does.
     fn leaf(self: *Gen, parent: *Node, ctx: Ctx) Error![]const u8 {
+        const spelled = try self.spell(parent, ctx);
+        return if (ctx == .paragraph) self.guardLines(spelled) else spelled;
+    }
+
+    /// Keeps a line of a paragraph that starts with inline HTML from being read
+    /// as the start of an HTML block. A line indented by four cannot start one,
+    /// and the indent of a continuation line is not part of its text. The first
+    /// line cannot be indented (it would be code), so a link reference
+    /// definition, which shows nothing, goes before it.
+    fn guardLines(self: *Gen, s: []const u8) Error![]const u8 {
+        if (std.mem.findScalar(u8, s, '<') == null) return s;
+        var out: std.ArrayList(u8) = .empty;
+        var lines = std.mem.splitScalar(u8, s, '\n');
+        var first = true;
+        while (lines.next()) |l| : (first = false) {
+            if (!first) try out.append(self.a, '\n');
+            const t = std.mem.trimStart(u8, l, " ");
+            const kind = if (l.len - t.len < 4) block_parser.htmlBlockKind(t) else 0;
+            // Only kinds 1 to 6 can interrupt a paragraph.
+            if (kind != 0 and (first or kind < 7)) {
+                try out.appendSlice(self.a, if (first) "[//]: #\n    " else "    ");
+            }
+            try out.appendSlice(self.a, l);
+        }
+        return out.items;
+    }
+
+    fn spell(self: *Gen, parent: *Node, ctx: Ctx) Error![]const u8 {
         const first = try self.inlines(parent, ctx);
         if (!hasEmphasis(parent)) return first;
         var footnotes: html.Footnotes = .empty;
@@ -466,8 +509,12 @@ const Gen = struct {
                 try self.destination(&out, n.literal);
                 if (n.title.len != 0) {
                     try out.appendSlice(self.a, " \"");
-                    for (n.title) |c| {
-                        if (c == '"' or c == '\\') try out.append(self.a, '\\');
+                    for (n.title, 0..) |c, i| {
+                        if (c == '\n') {
+                            try out.appendSlice(self.a, "&#10;");
+                            continue;
+                        }
+                        if (c == '"' or c == '\\' or (c == '&' and startsReference(n.title[i + 1 ..]))) try out.append(self.a, '\\');
                         try out.append(self.a, c);
                     }
                     try out.append(self.a, '"');

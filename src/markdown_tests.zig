@@ -180,3 +180,14 @@ test "code block info strings are escaped again" {
     defer std.testing.allocator.free(out);
     try std.testing.expectEqualStrings("```zig title=\"a & b\"\nc\n```\n", out);
 }
+
+test "block structures survive writing" {
+    try expectSameHtml(&.{
+        "* ---\n",                             "- - ___\n",              "- a\n- ***\n",
+        "a\n: \n",                             "a\n: \n: b\n",           "a[^1]\n\n[^1]:\n",
+        "+ [ ] [1]:;\n",                       "- [x] [1]: /u\n  - b\n", "c\n\t<div>\n",
+        "a\n    <!-- c -->\n",                 "> c\n    <div>\n",       "[r]:u\n<b>\n",
+        "[r]: u\n    <div>\n",                 "<a\nb>\n-\n",            "<a\nb> x\n===\n",
+        "[x](u \"a&#10;&#10;b &amp;amp;\")\n",
+    }, md.Extensions.all);
+}
