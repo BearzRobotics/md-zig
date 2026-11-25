@@ -286,3 +286,7 @@ test "nothing is added to an HTML block that was never closed" {
         "- <?\n- b\n\n- c\n",                       "<?\n\n",      "> <![CDATA[\n>\n\na\n",
     }, .{});
 }
+
+test "quotes stay apart after an HTML block that was never closed" {
+    try expectSameHtml(&.{ "><!--\n\n>", "- > <script\n\n  > a\n", "><!u\n\n>", "><script\n\n>" }, .{});
+}
