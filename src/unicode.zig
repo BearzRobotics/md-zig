@@ -7,6 +7,7 @@
 //! ordinary letters. This is a documented deviation (docs/decisions/0001).
 
 const std = @import("std");
+const widths = @import("widths.zig");
 
 pub fn isAsciiPunct(c: u8) bool {
     return (c >= 0x21 and c <= 0x2f) or (c >= 0x3a and c <= 0x40) or (c >= 0x5b and c <= 0x60) or (c >= 0x7b and c <= 0x7e);
@@ -62,17 +63,26 @@ pub fn decodeBefore(s: []const u8, end: usize) u21 {
 }
 
 /// How many terminal columns a code point takes: 0 for combining marks and
-/// zero-width characters, 2 for East Asian wide characters and emoji, else 1.
-/// An approximation by ranges (there is no Unicode database in the standard
-/// library).
+/// zero-width characters (an approximation by ranges; there is no Unicode
+/// database in the standard library), 2 for the wide and fullwidth characters
+/// of Unicode's East Asian Width property (`widths.zig`), else 1.
 pub fn displayWidth(cp: u21) usize {
-    return switch (cp) {
-        0x0300...0x036f, 0x200b...0x200f, 0x2060...0x2064, 0xfe00...0xfe0f, 0x20d0...0x20ff => 0,
-        0x1100...0x115f, 0x2e80...0x303e, 0x3041...0x33ff, 0x3400...0x4dbf, 0x4e00...0x9fff => 2,
-        0xa000...0xa4cf, 0xac00...0xd7a3, 0xf900...0xfaff, 0xfe30...0xfe6f, 0xff00...0xff60 => 2,
-        0xffe0...0xffe6, 0x1f300...0x1f64f, 0x1f900...0x1f9ff, 0x20000...0x3fffd => 2,
-        else => 1,
-    };
+    switch (cp) {
+        0x0300...0x036f, 0x200b...0x200f, 0x2060...0x2064, 0xfe00...0xfe0f, 0x20d0...0x20ff => return 0,
+        else => {},
+    }
+    var lo: usize = 0;
+    var hi: usize = widths.wide.len;
+    while (lo < hi) {
+        const mid = lo + (hi - lo) / 2;
+        const run = widths.wide[mid];
+        if (cp < run[0]) {
+            hi = mid;
+        } else if (cp > run[1]) {
+            lo = mid + 1;
+        } else return 2;
+    }
+    return 1;
 }
 
 /// The columns a UTF-8 string takes in a terminal.
@@ -85,4 +95,15 @@ pub fn stringWidth(s: []const u8) usize {
         i += d.len;
     }
     return w;
+}
+
+test "display widths follow East Asian Width" {
+    for ([_]u21{ 0x1100, 0x3042, 0x4e00, 0xff21, 0x1f600, 0x1f680, 0x2705, 0x2b50, 0x1f7e2, 0x1fa90, 0x20000 }) |cp| {
+        try std.testing.expectEqual(@as(usize, 2), displayWidth(cp));
+    }
+    for ([_]u21{ 'a', 0xe9, 0x2192, 0x303f, 0xff61, 0x1f321, 0x10ffff }) |cp| {
+        try std.testing.expectEqual(@as(usize, 1), displayWidth(cp));
+    }
+    try std.testing.expectEqual(@as(usize, 0), displayWidth(0x301));
+    for (widths.wide[1..], widths.wide[0 .. widths.wide.len - 1]) |run, before| try std.testing.expect(run[0] > before[1] + 1);
 }

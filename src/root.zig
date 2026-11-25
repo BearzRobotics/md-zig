@@ -181,6 +181,7 @@ fn feedLine(parser: *block.Parser, a: Allocator, line: []const u8) Allocator.Err
 
 test {
     _ = @import("text.zig");
+    _ = @import("unicode.zig");
     _ = @import("markdown_tests.zig");
     _ = @import("scan.zig");
     _ = @import("tests.zig");
