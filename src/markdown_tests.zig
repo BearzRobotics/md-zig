@@ -191,3 +191,10 @@ test "block structures survive writing" {
         "[x](u \"a&#10;&#10;b &amp;amp;\")\n",
     }, md.Extensions.all);
 }
+
+test "white space that is text survives at the ends of lines and blocks" {
+    try expectSameHtml(&.{
+        "a&#32;\n",      "a&#32;&#32;\n", "a&#9;\n",           "a&#12;\n",      "&#12;a\n", "&#11;\n", "a&#32;\nb\n",
+        "a&#32;\\\nb\n", "# a&#32;\n",    "| a&#32; |\n|-|\n", "a&#32;\n: d\n", "&#32;\n",
+    }, md.Extensions.all);
+}

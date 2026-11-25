@@ -473,7 +473,20 @@ const Gen = struct {
                         if (nx.kind != .text) break;
                         try run.appendSlice(self.a, nx.literal);
                     }
-                    try self.escape(&out, run.items, last.next, bol);
+                    // White space before a line ending, or at the end of the
+                    // block, is kept only as references.
+                    const at_end = if (last.next) |nx|
+                        nx.kind == .softbreak or nx.kind == .linebreak
+                    else switch (parent.kind) {
+                        .paragraph, .heading, .table_cell, .deflist_term => true,
+                        else => false,
+                    };
+                    var kept = run.items.len;
+                    if (at_end) {
+                        while (kept != 0 and std.mem.findScalar(u8, " \t\x0b\x0c", run.items[kept - 1]) != null) kept -= 1;
+                    }
+                    try self.escape(&out, run.items[0..kept], last.next, bol);
+                    for (run.items[kept..]) |ws| try out.print(self.a, "&#{d};", .{ws});
                     bol = false;
                     child = last.next;
                 },
@@ -671,8 +684,8 @@ const Gen = struct {
                     try out.appendSlice(self.a, "&#13;");
                     continue;
                 },
-                ' ', '\t' => if (at_start) {
-                    try out.appendSlice(self.a, if (c == ' ') "&#32;" else "&#9;");
+                ' ', '\t', 0x0b, 0x0c => if (at_start) {
+                    try out.print(self.a, "&#{d};", .{c});
                     at_start = false;
                     continue;
                 },
