@@ -191,6 +191,18 @@ pub const Parser = struct {
         return false;
     }
 
+    /// `content` without the link reference definitions at its start, which are
+    /// recorded.
+    fn stripReferences(self: *Parser, content: []const u8) Allocator.Error![]const u8 {
+        var rest = content;
+        while (rest.len > 0 and rest[0] == '[') {
+            const used = try inl.parseReference(self.a, &self.refs, rest);
+            if (used == 0) break;
+            rest = rest[used..];
+        }
+        return rest;
+    }
+
     fn finalize(self: *Parser, block: *Node) Allocator.Error!void {
         const above = block.parent;
         block.build.open = false;
@@ -199,15 +211,9 @@ pub const Parser = struct {
                 var content: []const u8 = block.build.content.items;
                 if (self.ext.task_lists) content = taskMarker(block, content);
                 // Leading link reference definitions are removed from the paragraph.
-                var had_defs = false;
-                while (content.len > 0 and content[0] == '[') {
-                    const used = try inl.parseReference(self.a, &self.refs, content);
-                    if (used == 0) break;
-                    content = content[used..];
-                    had_defs = true;
-                }
-                block.literal = content;
-                if (had_defs and isBlank(content)) block.unlink();
+                const rest = try self.stripReferences(content);
+                block.literal = rest;
+                if (rest.len < content.len and isBlank(rest)) block.unlink();
             },
             .heading => block.literal = block.build.content.items,
             .table => try self.buildTable(block),
@@ -559,12 +565,7 @@ pub const Parser = struct {
 
         try self.closeUnmatchedBlocks();
         // Link reference definitions at the start of the paragraph are removed first.
-        var content: []const u8 = container.build.content.items;
-        while (content.len > 0 and content[0] == '[') {
-            const used = try inl.parseReference(self.a, &self.refs, content);
-            if (used == 0) break;
-            content = content[used..];
-        }
+        const content = try self.stripReferences(container.build.content.items);
         if (content.len == 0) return 0;
         const h = try self.newNode(.heading);
         h.line = container.line;
@@ -777,8 +778,16 @@ pub const Parser = struct {
         const rest = self.line[self.next_nonspace..];
         if (rest.len < 2 or rest[0] != ':' or !text.isSpaceOrTab(rest[1])) return 0;
         if (container.kind != .paragraph and container.kind != .deflist) return 0;
-        // A paragraph that is only link reference definitions has no term.
-        if (container.kind == .paragraph and isBlank(container.build.content.items)) return 0;
+        // Reference definitions at the start of a paragraph are not terms, and a
+        // paragraph that holds nothing else has none.
+        var terms: []const u8 = "";
+        var first_term_line: u32 = 0;
+        if (container.kind == .paragraph) {
+            const content = container.build.content.items;
+            terms = try self.stripReferences(content);
+            if (isBlank(terms)) return 0;
+            first_term_line = @intCast(std.mem.countScalar(u8, content[0 .. content.len - terms.len], '\n'));
+        }
 
         const marker_offset = self.indent;
         try self.closeUnmatchedBlocks();
@@ -787,6 +796,7 @@ pub const Parser = struct {
             const para = container;
             const parent = para.parent.?;
             const prev = para.prev;
+            if (self.ext.task_lists) terms = taskMarker(para, terms);
             para.unlink();
             if (prev != null and prev.?.kind == .deflist) {
                 // Terms after a blank line join the list above.
@@ -795,12 +805,12 @@ pub const Parser = struct {
                 dl.build.last_line_checked = false;
             } else {
                 dl = try self.newNode(.deflist);
-                dl.line = para.line;
+                dl.line = para.line + first_term_line;
                 dl.list.tight = true;
                 parent.appendChild(dl);
             }
-            var lines = std.mem.splitScalar(u8, para.build.content.items, '\n');
-            var k: u32 = 0;
+            var lines = std.mem.splitScalar(u8, terms, '\n');
+            var k: u32 = first_term_line;
             while (lines.next()) |l| : (k += 1) {
                 const term_text = std.mem.trim(u8, l, " \t");
                 if (term_text.len == 0) continue;

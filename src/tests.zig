@@ -304,3 +304,28 @@ test "a table ends where another block starts" {
         try std.testing.expectEqual(@as(usize, 3), std.mem.count(u8, out, "<tr>"));
     }
 }
+
+test "reference definitions before a term are definitions, not terms" {
+    try expectDl("[x]: /u\n: d\n\n[x]\n", "<p>: d</p>\n<p><a href=\"/u\">x</a></p>\n");
+    try expectDl("[x]: /u\nTerm\n: d\n\n[x]\n", "<dl>\n<dt>Term</dt>\n<dd>d</dd>\n</dl>\n<p><a href=\"/u\">x</a></p>\n");
+}
+
+test "a term after reference definitions keeps its line number; task boxes apply" {
+    const gpa = std.testing.allocator;
+    var doc = try md.Document.parse(gpa, "- [x] T\n  : d\n\n[a]: /u\n[b]: /v\nU\n: e\n", .{ .extensions = md.Extensions.all });
+    defer doc.deinit();
+    var walker = md.Walker.init(doc.root);
+    var lines: [2]u32 = .{ 0, 0 };
+    var n: usize = 0;
+    var tasks: usize = 0;
+    while (walker.next()) |ev| {
+        if (!ev.entering) continue;
+        if (ev.node.kind == .deflist_term) {
+            lines[n] = ev.node.line;
+            n += 1;
+        }
+        if (ev.node.kind == .item and ev.node.task == .checked) tasks += 1;
+    }
+    try std.testing.expectEqualSlices(u32, &.{ 1, 6 }, &lines);
+    try std.testing.expectEqual(@as(usize, 1), tasks);
+}
