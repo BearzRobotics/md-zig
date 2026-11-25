@@ -40,8 +40,9 @@ instead of the default 4 (`Node.flush` for none).
    `inline.processTree`: every paragraph, heading and table cell is parsed with
    the delimiter stack (emphasis) and bracket stack (links). Link reference
    definitions were collected in step 2, so a use before the definition works.
-4. A renderer walks the tree with `Walker` (no recursion, so deep nesting cannot
-   overflow the stack) and writes to a `std.Io.Writer`.
+4. A renderer writes the tree to a `std.Io.Writer`. The HTML renderer walks it
+   with `Walker` (no recursion). The terminal and Markdown writers recurse, with
+   a depth limit (see Limits).
 
 ## Memory
 
@@ -53,4 +54,5 @@ table cells).
 
 `Options.max_bytes` and `max_line_bytes` bound the input. Nesting of containers
 is bounded by the input size only; the parser and the HTML renderer are
-iterative. The terminal renderer recurses and stops at 64 levels.
+iterative. The terminal renderer recurses over blocks and over inlines and stops
+at 64 levels of each; deeper inline content is written as plain text.

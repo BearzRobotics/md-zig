@@ -237,11 +237,26 @@ const Renderer = struct {
                 },
                 .emph, .strong, .strikethrough, .link, .image => {
                     if (depth >= max_depth) {
-                        try self.inlines(n, tokens, depth);
+                        try self.flattened(n, tokens);
                         continue;
                     }
                     try self.styled(n, tokens, depth);
                 },
+                else => {},
+            }
+        }
+    }
+
+    /// What is left of inlines nested more than `max_depth` deep: their text,
+    /// without styles, link addresses or markers. Walks without recursion.
+    fn flattened(self: *Renderer, n: *Node, tokens: *std.ArrayList(Token)) Allocator.Error!void {
+        var walker = ast.Walker.init(n);
+        while (walker.next()) |ev| {
+            if (!ev.entering) continue;
+            switch (ev.node.kind) {
+                .text, .code => try self.addText(tokens, ev.node.literal),
+                .softbreak => try tokens.append(self.a, .space),
+                .linebreak => try tokens.append(self.a, .hard_break),
                 else => {},
             }
         }

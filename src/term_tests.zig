@@ -3,6 +3,7 @@
 const std = @import("std");
 const md = @import("root.zig");
 const testing = std.testing;
+const max_depth = md.term.max_depth;
 
 fn text(gpa: std.mem.Allocator, src: []const u8, ext: md.Extensions, o: md.TextOptions) ![]u8 {
     var doc = try md.Document.parse(gpa, src, .{ .extensions = ext });
@@ -264,4 +265,20 @@ test "colour output holds only the renderer's own escape sequences" {
     var i: usize = 0;
     while (std.mem.findScalarPos(u8, out, i, 0x1b)) |at| : (i = at + 1) try testing.expectEqual(@as(u8, '['), out[at + 1]);
     try testing.expect(std.mem.findScalar(u8, out, 0x07) == null);
+}
+
+test "deeply nested inlines are flattened, not a stack overflow" {
+    const gpa = testing.allocator;
+    const n = 200_000;
+    const src = try gpa.alloc(u8, 2 * n + 2);
+    defer gpa.free(src);
+    @memset(src[0..n], '*');
+    src[n] = 'a';
+    @memset(src[n + 1 .. 2 * n + 1], '*');
+    src[src.len - 1] = '\n';
+    const out = try text(gpa, src, .{}, .{ .width = 0 });
+    defer gpa.free(out);
+    // Only max_depth levels keep their markers; the text survives.
+    try testing.expectEqual(@as(usize, max_depth * 2 * 2 + 2), out.len);
+    try testing.expect(std.mem.find(u8, out, "a") != null);
 }
