@@ -156,6 +156,31 @@ const Gen = struct {
         return s;
     }
 
+    /// `info` as it must be written after a fence of `fence` characters: the
+    /// tree holds it with escapes and references already replaced.
+    fn infoString(self: *Gen, out: *std.ArrayList(u8), info: []const u8, fence: u8) Error!void {
+        // A space keeps it from lengthening the fence.
+        if (info.len != 0 and info[0] == fence) try out.append(self.a, ' ');
+        for (info, 0..) |c, i| {
+            // White space at either end would be trimmed away.
+            const at_end = i == 0 or i + 1 == info.len;
+            switch (c) {
+                '\\' => try out.appendSlice(self.a, "\\\\"),
+                '&' => try out.appendSlice(self.a, if (startsReference(info[i + 1 ..])) "\\&" else "&"),
+                '\n' => try out.appendSlice(self.a, "&#10;"),
+                '\r' => try out.appendSlice(self.a, "&#13;"),
+                ' ' => try out.appendSlice(self.a, if (at_end) "&#32;" else " "),
+                '\t' => try out.appendSlice(self.a, if (at_end) "&#9;" else "\t"),
+                else => try out.append(self.a, c),
+            }
+        }
+    }
+
+    /// Whether `&` followed by `rest` could be read as a character reference.
+    fn startsReference(rest: []const u8) bool {
+        return rest.len != 0 and (std.ascii.isAlphanumeric(rest[0]) or rest[0] == '#');
+    }
+
     fn codeBlock(self: *Gen, n: *Node) Error![]const u8 {
         const info = n.title;
         const ch: u8 = if (std.mem.findScalar(u8, info, '`') != null) '~' else '`';
@@ -171,7 +196,7 @@ const Gen = struct {
         }
         var out: std.ArrayList(u8) = .empty;
         try out.appendNTimes(self.a, ch, len);
-        try out.appendSlice(self.a, info);
+        try self.infoString(&out, info, ch);
         try out.append(self.a, '\n');
         try out.appendSlice(self.a, n.literal);
         if (n.literal.len != 0 and n.literal[n.literal.len - 1] != '\n') try out.append(self.a, '\n');

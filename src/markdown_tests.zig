@@ -166,3 +166,17 @@ test "pipes anywhere in a table cell stay in the cell" {
         "| a |\n|-|\n| *x\\|* [^\\|] |\n\n[^\\|]: n\n",
     }, md.Extensions.all);
 }
+
+test "code block info strings are escaped again" {
+    try expectSameHtml(&.{
+        "``` a\\\\*b\nc\n```\n",
+        "``` &amp;lt;\nc\n```\n",
+        "~~~&#10;x\ny\n~~~\n",
+        "~~~ ~x`\nc\n~~~\n",
+        "``` &#32;a&#9;\nc\n```\n",
+        "``` x&#32;y a&b\nc\n```\n",
+    }, .{});
+    const out = try written("```zig title=\"a & b\"\nc\n```\n", .{});
+    defer std.testing.allocator.free(out);
+    try std.testing.expectEqualStrings("```zig title=\"a & b\"\nc\n```\n", out);
+}
