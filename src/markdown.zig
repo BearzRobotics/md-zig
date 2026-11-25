@@ -241,7 +241,8 @@ const Gen = struct {
                 try std.fmt.allocPrint(self.a, "{c} ", .{bullet})
             else
                 try std.fmt.allocPrint(self.a, "{d}{c} ", .{ number, delim });
-            number +%= 1;
+            // A marker has at most nine digits; only the first number counts.
+            if (number < 999_999_999) number += 1;
             var inner = try self.itemBody(it, ld.tight);
             const pad = try self.a.alloc(u8, marker.len);
             @memset(pad, ' ');

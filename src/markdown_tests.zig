@@ -198,3 +198,7 @@ test "white space that is text survives at the ends of lines and blocks" {
         "a&#32;\\\nb\n", "# a&#32;\n",    "| a&#32; |\n|-|\n", "a&#32;\n: d\n", "&#32;\n",
     }, md.Extensions.all);
 }
+
+test "list numbers stay within nine digits" {
+    try expectSameHtml(&.{"999999999. a\n999999999. b\n999999998) c\n999999999) d\n"}, .{});
+}
