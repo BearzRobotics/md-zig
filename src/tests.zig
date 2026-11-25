@@ -422,3 +422,11 @@ test "an HTML block without its closer keeps the blank lines that end the input"
         try std.testing.expectEqualStrings(case[1], out);
     }
 }
+
+test "an inline link is a link even where its text names a footnote" {
+    const gpa = std.testing.allocator;
+    const out = try renderWith(gpa, "[^1](u) [^1](not a link)\n\n[^1]: n\n", .{ .footnotes = true });
+    defer gpa.free(out);
+    try std.testing.expect(std.mem.startsWith(u8, out, "<p><a href=\"u\">^1</a> <sup class=\"footnote-ref\">"));
+    try std.testing.expect(std.mem.find(u8, out, "(not a link)") != null);
+}

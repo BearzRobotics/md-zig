@@ -577,20 +577,8 @@ const Inl = struct {
         var title: ?[]const u8 = null;
         var matched = false;
 
-        // A footnote reference: [^label] with a matching definition.
-        var footnote_key: ?[]const u8 = null;
-        if (self.ext.footnotes and !is_image and self.footnotes != null) {
-            const inner = self.subject[opener.index + 1 .. start - 1];
-            if (inner.len > 1 and inner[0] == '^' and std.mem.findAny(u8, inner, " \t\n[]") == null) {
-                const key = try text.normalizeLabel(self.a, inner[1..]);
-                if (self.footnotes.?.contains(key)) footnote_key = key;
-            }
-        }
-
         // An inline link: ( destination "title" )
-        if (footnote_key != null) {
-            matched = true;
-        } else if (self.peek() == '(') {
+        if (self.peek() == '(') {
             self.pos += 1;
             self.spnl();
             if (try self.parseLinkDestination()) |d| {
@@ -607,7 +595,21 @@ const Inl = struct {
             if (!matched) self.pos = save;
         }
 
-        if (!matched and footnote_key == null) {
+        // A footnote reference: [^label] with a matching definition. A valid
+        // inline link comes first, since that is what CommonMark makes of it.
+        var footnote_key: ?[]const u8 = null;
+        if (!matched and self.ext.footnotes and !is_image and self.footnotes != null) {
+            const inner = self.subject[opener.index + 1 .. start - 1];
+            if (inner.len > 1 and inner[0] == '^' and std.mem.findAny(u8, inner, " \t\n[]") == null) {
+                const key = try text.normalizeLabel(self.a, inner[1..]);
+                if (self.footnotes.?.contains(key)) {
+                    footnote_key = key;
+                    matched = true;
+                }
+            }
+        }
+
+        if (!matched) {
             // A reference link: [text][label], [text][] or [text].
             const before_label = self.pos;
             const n = self.parseLinkLabel();
