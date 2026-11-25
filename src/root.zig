@@ -56,6 +56,7 @@ pub const Document = struct {
         var arena = std.heap.ArenaAllocator.init(gpa);
         errdefer arena.deinit();
         var parser = try block.Parser.init(arena.allocator(), options.extensions);
+        parser.max_padded_cells = options.max_padded_cells;
 
         var line: Io.Writer.Allocating = .init(gpa);
         defer line.deinit();

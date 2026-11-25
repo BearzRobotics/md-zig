@@ -40,5 +40,9 @@ pub const Options = struct {
     max_bytes: usize = 64 * 1024 * 1024,
     /// Longest accepted line, in bytes.
     max_line_bytes: usize = 4 * 1024 * 1024,
+    /// Most empty cells added, in the whole document, to table rows that are
+    /// shorter than their header. Without a limit, memory grows with columns
+    /// times rows. A table ends before the row that would pass the limit.
+    max_padded_cells: usize = 512 * 1024,
     extensions: Extensions = .{},
 };

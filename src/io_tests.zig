@@ -209,3 +209,46 @@ test "deeply nested input does not overflow the stack" {
     defer gpa.free(got);
     try testing.expect(got.len > depth);
 }
+
+fn countKind(root: *md.Node, kind: md.Kind) usize {
+    var n: usize = 0;
+    var walker = md.Walker.init(root);
+    while (walker.next()) |ev| {
+        if (ev.entering and ev.node.kind == kind) n += 1;
+    }
+    return n;
+}
+
+test "padding short table rows is limited for the whole document" {
+    const gpa = testing.allocator;
+    // Two tables of four columns; each short row is padded with three cells.
+    const table = "|a|b|c|d|\n|-|-|-|-|\n1\n2\n3\n";
+    const src = table ++ "\n" ++ table;
+    for ([_]struct { usize, usize }{ .{ 18, 8 }, .{ 17, 7 }, .{ 9, 5 }, .{ 0, 2 } }) |case| {
+        var doc = try md.Document.parse(gpa, src, .{ .extensions = md.Extensions.gfm, .max_padded_cells = case[0] });
+        defer doc.deinit();
+        try testing.expectEqual(@as(usize, 2), countKind(doc.root, .table));
+        try testing.expectEqual(case[1], countKind(doc.root, .table_row));
+    }
+    // Full rows use none of the budget.
+    var doc = try md.Document.parse(gpa, "|a|b|\n|-|-|\n|1|2|\n|3|4|\n", .{ .extensions = md.Extensions.gfm, .max_padded_cells = 0 });
+    defer doc.deinit();
+    try testing.expectEqual(@as(usize, 3), countKind(doc.root, .table_row));
+}
+
+test "a wide table with many short rows stays within the default budget" {
+    const gpa = testing.allocator;
+    const n = 4000;
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(gpa);
+    try out.append(gpa, '|');
+    for (0..n) |_| try out.appendSlice(gpa, "a|");
+    try out.appendSlice(gpa, "\n|");
+    for (0..n) |_| try out.appendSlice(gpa, "-|");
+    try out.append(gpa, '\n');
+    for (0..n) |_| try out.appendSlice(gpa, "b\n");
+    const src = out.items;
+    var doc = try md.Document.parse(gpa, src, .{ .extensions = md.Extensions.gfm });
+    defer doc.deinit();
+    try testing.expect(countKind(doc.root, .table_cell) <= (md.Options{}).max_padded_cells + 2 * n + (512 * 1024 / n + 1));
+}

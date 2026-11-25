@@ -24,6 +24,9 @@ pub const Parser = struct {
     last_matched: *Node,
     refs: inl.RefMap = .empty,
     ext: opts.Extensions,
+    /// Empty cells that short table rows will be padded with, so far.
+    padded_cells: usize = 0,
+    max_padded_cells: usize = (opts.Options{}).max_padded_cells,
     /// Footnote definitions by normalized label (first definition wins).
     footnotes: std.StringHashMapUnmanaged(*Node) = .empty,
 
@@ -322,6 +325,9 @@ pub const Parser = struct {
             .table => {
                 // A table ends at a blank line or where another block starts.
                 if (self.blank or self.startsOtherBlock()) return .not_matched;
+                // It also ends before a row that would use up the padding budget.
+                const padding = container.build.aligns.len -| countCells(self.line[self.next_nonspace..]);
+                if (padding > self.max_padded_cells - self.padded_cells) return .not_matched;
                 return .matched;
             },
             .footnote_def => {
@@ -829,22 +835,46 @@ pub const Parser = struct {
         return std.mem.trimStart(u8, content[3..], " \t");
     }
 
-    /// Splits one table row into cells. Leading and trailing pipes are
-    /// optional; `\|` is a pipe inside a cell.
+    /// The raw pieces of one table row. Leading and trailing pipes are
+    /// optional; an escaped pipe does not separate cells.
+    const RowCells = struct {
+        s: []const u8,
+        start: usize = 0,
+
+        fn init(line: []const u8) RowCells {
+            var s = std.mem.trim(u8, line, " \t");
+            if (s.len > 0 and s[0] == '|') s = s[1..];
+            if (s.len > 0 and s[s.len - 1] == '|' and !pipeEscaped(s, s.len - 1)) s = s[0 .. s.len - 1];
+            return .{ .s = s };
+        }
+
+        fn next(self: *RowCells) ?[]const u8 {
+            if (self.start > self.s.len) return null;
+            var i = self.start;
+            while (i < self.s.len and !(self.s[i] == '|' and !pipeEscaped(self.s, i))) i += 1;
+            const cell = self.s[self.start..i];
+            self.start = i + 1;
+            return cell;
+        }
+    };
+
+    /// Splits one table row into cells; `\|` is a pipe inside a cell.
     fn splitRow(a: Allocator, line: []const u8) Allocator.Error![]const []const u8 {
-        var s = std.mem.trim(u8, line, " \t");
-        if (s.len > 0 and s[0] == '|') s = s[1..];
-        if (s.len > 0 and s[s.len - 1] == '|' and !pipeEscaped(s, s.len - 1)) s = s[0 .. s.len - 1];
         var cells: std.ArrayList([]const u8) = .empty;
-        var start: usize = 0;
-        var i: usize = 0;
-        while (i <= s.len) : (i += 1) {
-            if (i < s.len and !(s[i] == '|' and !pipeEscaped(s, i))) continue;
-            const raw = std.mem.trim(u8, s[start..i], " \t");
+        var pieces: RowCells = .init(line);
+        while (pieces.next()) |piece| {
+            const raw = std.mem.trim(u8, piece, " \t");
             try cells.append(a, if (std.mem.find(u8, raw, "\\|") != null) try replaceAll(a, raw, "\\|", "|") else raw);
-            start = i + 1;
         }
         return cells.items;
+    }
+
+    /// How many cells `splitRow` finds in `line`.
+    fn countCells(line: []const u8) usize {
+        var cells: RowCells = .init(line);
+        var n: usize = 0;
+        while (cells.next() != null) n += 1;
+        return n;
     }
 
     fn pipeEscaped(s: []const u8, i: usize) bool {
@@ -1014,6 +1044,9 @@ pub const Parser = struct {
             while (cont) |c| : (cont = c.parent) c.build.last_line_blank = last_line_blank;
 
             if (acceptsLines(t)) {
+                if (t == .table and self.offset < self.line.len) {
+                    self.padded_cells += container.build.aligns.len -| countCells(self.line[self.offset..]);
+                }
                 try self.addLine();
                 if (t == .html_block and container.build.html_type >= 1 and container.build.html_type <= 5 and
                     htmlBlockEnds(container.build.html_type, self.line[@min(self.offset, self.line.len)..]))
