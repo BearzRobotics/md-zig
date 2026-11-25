@@ -11,8 +11,8 @@ pub const Extensions = packed struct {
     task_lists: bool = false,
     /// Bare `https://...`, `www....` and e-mail addresses become links (GFM).
     autolinks: bool = false,
-    /// Raw HTML for a few dangerous tags (`<script>`, `<style>`, ...) is shown as
-    /// text (GFM "disallowed raw HTML").
+    /// Raw HTML for the nine tags GFM disallows (`<script>`, `<style>`, ...) is
+    /// shown as text. This is not a sanitiser; see `html.Options.safe`.
     tagfilter: bool = false,
     /// `[^label]` references and `[^label]: text` definitions.
     footnotes: bool = false,

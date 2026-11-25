@@ -23,6 +23,7 @@ pub const html = @import("html.zig");
 pub const term = @import("term.zig");
 pub const markdown = @import("markdown.zig");
 pub const TextOptions = term.TextOptions;
+pub const HtmlOptions = html.Options;
 const block = @import("block.zig");
 
 pub const Options = @import("options.zig").Options;
@@ -94,9 +95,16 @@ pub const Document = struct {
         self.* = undefined;
     }
 
-    /// Writes the document as HTML.
+    /// Writes the document as HTML, as CommonMark specifies: raw HTML and
+    /// every link address pass through. For input that is not trusted use
+    /// `writeHtmlOptions` with `.safe = true`.
     pub fn writeHtml(self: *const Document, gpa: Allocator, w: *Io.Writer) html.Error!void {
-        try html.write(gpa, self.root, &self.footnotes, self.extensions, w);
+        try self.writeHtmlOptions(gpa, w, .{});
+    }
+
+    /// Writes the document as HTML with `HtmlOptions`.
+    pub fn writeHtmlOptions(self: *const Document, gpa: Allocator, w: *Io.Writer, options: HtmlOptions) html.Error!void {
+        try html.write(gpa, self.root, &self.footnotes, self.extensions, options, w);
     }
 
     /// Writes the document as Markdown (see `markdown.zig`: the meaning and the

@@ -14,6 +14,39 @@ pub const Error = Io.Writer.Error || Allocator.Error;
 
 pub const Footnotes = std.StringHashMapUnmanaged(*Node);
 
+pub const Options = struct {
+    /// For input that is not trusted: raw HTML is left out and link and image
+    /// addresses that can run script or read local files are emptied, as cmark
+    /// does by default. Off by default, which gives CommonMark's output.
+    safe: bool = false,
+};
+
+/// Whether safe mode empties this destination: `javascript:`, `vbscript:`,
+/// `file:`, and `data:` other than PNG, GIF, JPEG and WebP images. White space
+/// and control characters that browsers ignore are skipped over, because a
+/// tree built by another reader need not hold an encoded address.
+pub fn isDangerousUrl(url: []const u8) bool {
+    var buf: [16]u8 = undefined;
+    var n: usize = 0;
+    var started = false;
+    for (url) |c| {
+        if (c == '\t' or c == '\n' or c == '\r' or (!started and c <= ' ')) continue;
+        started = true;
+        buf[n] = std.ascii.toLower(c);
+        n += 1;
+        if (n == buf.len) break;
+    }
+    const head = buf[0..n];
+    for ([_][]const u8{ "javascript:", "vbscript:", "file:" }) |scheme| {
+        if (std.mem.startsWith(u8, head, scheme)) return true;
+    }
+    if (!std.mem.startsWith(u8, head, "data:")) return false;
+    for ([_][]const u8{ "data:image/png", "data:image/gif", "data:image/jpeg", "data:image/webp" }) |image| {
+        if (std.mem.startsWith(u8, head, image)) return false;
+    }
+    return true;
+}
+
 /// A footnote that is referenced, in order of first reference.
 const Used = struct { key: []const u8, def: *Node, refs: usize };
 
@@ -21,6 +54,7 @@ const Renderer = struct {
     w: *Io.Writer,
     arena: Allocator,
     ext: opts.Extensions,
+    safe: bool = false,
     defs: *const Footnotes,
     /// Last byte written, to decide whether a line break is needed.
     last: u8 = '\n',
@@ -62,6 +96,7 @@ const Renderer = struct {
 
     /// Raw HTML, with the tags GFM disallows shown as text when `tagfilter` is on.
     fn raw(self: *Renderer, s: []const u8) Error!void {
+        if (self.safe) return self.lit("<!-- raw HTML omitted -->");
         if (!self.ext.tagfilter) return self.lit(s);
         var start: usize = 0;
         var i: usize = 0;
@@ -72,6 +107,10 @@ const Renderer = struct {
             start = i + 1;
         }
         try self.lit(s[start..]);
+    }
+
+    fn url(self: *Renderer, s: []const u8) Error!void {
+        if (!self.safe or !isDangerousUrl(s)) try self.esc(s);
     }
 
     fn open(self: *Renderer, name: []const u8) Error!void {
@@ -241,7 +280,7 @@ const Renderer = struct {
                 if (entering) {
                     if (self.no_tags == 0) {
                         try self.lit("<a href=\"");
-                        try self.esc(n.literal);
+                        try self.url(n.literal);
                         try self.lit("\"");
                         if (n.title.len > 0) {
                             try self.lit(" title=\"");
@@ -256,7 +295,7 @@ const Renderer = struct {
                 if (entering) {
                     if (self.no_tags == 0) {
                         try self.lit("<img src=\"");
-                        try self.esc(n.literal);
+                        try self.url(n.literal);
                         try self.lit("\" alt=\"");
                     }
                     self.no_tags += 1;
@@ -403,10 +442,10 @@ fn disallowedTag(after_lt: []const u8) bool {
     return false;
 }
 
-pub fn write(gpa: Allocator, root: *Node, defs: *const Footnotes, ext: opts.Extensions, w: *Io.Writer) Error!void {
+pub fn write(gpa: Allocator, root: *Node, defs: *const Footnotes, ext: opts.Extensions, options: Options, w: *Io.Writer) Error!void {
     var arena = std.heap.ArenaAllocator.init(gpa);
     defer arena.deinit();
-    var r: Renderer = .{ .w = w, .arena = arena.allocator(), .ext = ext, .defs = defs };
+    var r: Renderer = .{ .w = w, .arena = arena.allocator(), .ext = ext, .safe = options.safe, .defs = defs };
     try r.render(root);
     try r.footnotes();
 }

@@ -27,6 +27,16 @@ Read from any reader, with extensions:
 var doc = try md.Document.parseReader(gpa, &reader, .{ .extensions = md.Extensions.gfm });
 ```
 
+**HTML from untrusted input is not safe by default.** As CommonMark specifies,
+raw HTML and any link address (including `javascript:`) pass through, and the
+`tagfilter` extension only filters GFM's nine tags: it is not a sanitiser. Use
+the safe mode, which leaves out raw HTML and empties `javascript:`, `vbscript:`,
+`file:` and non-image `data:` addresses (`md_to_safe_html` in C):
+
+```zig
+try doc.writeHtmlOptions(gpa, writer, .{ .safe = true });
+```
+
 `Options` limit the input (`max_bytes`, `max_line_bytes`); a longer input fails
 with `error.InputTooLarge` or `error.LineTooLong`. The tree (`doc.root`,
 `md.Node`, walked iteratively with `md.Walker`) is public, for consumers that

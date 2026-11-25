@@ -84,6 +84,25 @@ export fn md_to_html(doc: ?*const Handle, out: ?*?[*]u8, out_len: ?*usize) c_int
     return give(s, o, l);
 }
 
+/// HTML for untrusted input (`HtmlOptions.safe`).
+export fn md_to_safe_html(doc: ?*const Handle, out: ?*?[*]u8, out_len: ?*usize) c_int {
+    const o = out orelse return err_invalid_argument;
+    const l = out_len orelse return err_invalid_argument;
+    o.* = null;
+    l.* = 0;
+    const h = doc orelse return err_invalid_argument;
+    var buf: std.Io.Writer.Allocating = .init(gpa);
+    h.doc.writeHtmlOptions(gpa, &buf.writer, .{ .safe = true }) catch {
+        buf.deinit();
+        return err_out_of_memory;
+    };
+    const s = buf.toOwnedSlice() catch {
+        buf.deinit();
+        return err_out_of_memory;
+    };
+    return give(s, o, l);
+}
+
 export fn md_to_text(doc: ?*const Handle, width: usize, color: c_int, out: ?*?[*]u8, out_len: ?*usize) c_int {
     const o = out orelse return err_invalid_argument;
     const l = out_len orelse return err_invalid_argument;

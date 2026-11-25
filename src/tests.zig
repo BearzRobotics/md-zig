@@ -194,3 +194,40 @@ test "a thematic break is still found after list markers and failed attempts" {
     defer gpa.free(out);
     try std.testing.expectEqualStrings("<ul>\n<li>\n<ul>\n<li>\n<hr />\n</li>\n</ul>\n</li>\n<li>\n<ul>\n<li>x</li>\n</ul>\n</li>\n</ul>\n<hr />\n", out);
 }
+
+fn renderSafe(gpa: std.mem.Allocator, source: []const u8) ![]u8 {
+    var doc = try md.Document.parse(gpa, source, .{ .extensions = md.Extensions.all });
+    defer doc.deinit();
+    var out: std.Io.Writer.Allocating = .init(gpa);
+    errdefer out.deinit();
+    try doc.writeHtmlOptions(gpa, &out.writer, .{ .safe = true });
+    return out.toOwnedSlice();
+}
+
+test "safe HTML leaves out raw HTML and empties dangerous addresses" {
+    const gpa = std.testing.allocator;
+    for ([_][2][]const u8{
+        .{ "<script>x</script>\n", "<!-- raw HTML omitted -->\n" },
+        .{ "a <img src=x onerror=y> b\n", "<p>a <!-- raw HTML omitted --> b</p>\n" },
+        .{ "[x](javascript:alert(1))\n", "<p><a href=\"\">x</a></p>\n" },
+        .{ "[x](JaVaScRiPt&#58;a)\n", "<p><a href=\"\">x</a></p>\n" },
+        .{ "<vbscript:a>\n", "<p><a href=\"\">vbscript:a</a></p>\n" },
+        .{ "[x](file:///etc/passwd \"t\")\n", "<p><a href=\"\" title=\"t\">x</a></p>\n" },
+        .{ "![i](data:text/html,x)\n", "<p><img src=\"\" alt=\"i\" /></p>\n" },
+        .{ "![i](data:image/png;base64,AA)\n", "<p><img src=\"data:image/png;base64,AA\" alt=\"i\" /></p>\n" },
+        .{ "[x](https://a.b/javascript:)\n", "<p><a href=\"https://a.b/javascript:\">x</a></p>\n" },
+    }) |case| {
+        const out = try renderSafe(gpa, case[0]);
+        defer gpa.free(out);
+        try std.testing.expectEqualStrings(case[1], out);
+    }
+}
+
+test "dangerous addresses are recognised in trees built by other readers" {
+    for ([_][]const u8{ " javascript:a", "\x01\njavascript:a", "java\tscr\nipt:a", "DATA:image/svg+xml,x" }) |url| {
+        try std.testing.expect(md.html.isDangerousUrl(url));
+    }
+    for ([_][]const u8{ "", "a", "/javascript:", "https://x", "mailto:a@b.c" }) |url| {
+        try std.testing.expect(!md.html.isDangerousUrl(url));
+    }
+}

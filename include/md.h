@@ -53,13 +53,19 @@ int md_parse(const uint8_t *src, size_t len, uint32_t extensions, md_document **
 /* Releases a document. NULL is allowed. */
 void md_free(md_document *doc);
 
-/* HTML for the document. */
+/* HTML for the document. Raw HTML and every link address pass through: do not
+ * use it on untrusted input. */
 int md_to_html(const md_document *doc, uint8_t **out, size_t *out_len);
+
+/* HTML for untrusted input: raw HTML is left out and javascript:, vbscript:,
+ * file: and non-image data: addresses are emptied. */
+int md_to_safe_html(const md_document *doc, uint8_t **out, size_t *out_len);
 
 /* Text for a terminal. width 0 means do not wrap; color nonzero adds ANSI styles. */
 int md_to_text(const md_document *doc, size_t width, int color, uint8_t **out, size_t *out_len);
 
-/* Releases a string returned by md_to_html or md_to_text. NULL is allowed. */
+/* Releases a string returned by md_to_html, md_to_safe_html or
+ * md_to_text. NULL is allowed. */
 void md_free_string(uint8_t *ptr, size_t len);
 
 #ifdef __cplusplus
