@@ -326,3 +326,13 @@ test "table headers are bold in colour, also after styles inside them end" {
     _ = lines.next();
     try testing.expect(std.mem.find(u8, lines.next().?, "\x1b[1m") == null);
 }
+
+test "white space inside code spans is kept" {
+    const gpa = testing.allocator;
+    const out = try text(gpa, "run `a    b c` and `` ` x `` or `  y  ` now\n", .{}, .{});
+    defer gpa.free(out);
+    try testing.expectEqualStrings("run `a    b c` and `` x` or ` y ` now\n", out);
+    const wrapped = try text(gpa, "`aaaaaaaaaa bbbb  cccc dddd` end\n", .{}, .{ .width = 20 });
+    defer gpa.free(wrapped);
+    try testing.expectEqualStrings("`aaaaaaaaaa\nbbbb  cccc dddd` end\n", wrapped);
+}

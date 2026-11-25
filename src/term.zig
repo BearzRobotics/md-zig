@@ -197,6 +197,27 @@ const Renderer = struct {
         }
     }
 
+    /// The words of a code span. Unlike in prose, a run of white space is part
+    /// of the text: it is kept, and the line is not broken inside it. Single
+    /// spaces still allow a break. A tab becomes one space.
+    fn addCode(self: *Renderer, tokens: *std.ArrayList(Token), s: []const u8) Allocator.Error!void {
+        var i: usize = 0;
+        while (i < s.len) {
+            const start = i;
+            const white = text.isWhitespace(s[i]);
+            while (i < s.len and text.isWhitespace(s[i]) == white) i += 1;
+            if (!white) {
+                try tokens.append(self.a, .{ .word = try self.clean(s[start..i]) });
+            } else if (i - start == 1 and start != 0 and i != s.len) {
+                try tokens.append(self.a, .space);
+            } else {
+                const kept = try self.a.alloc(u8, i - start);
+                @memset(kept, ' ');
+                try tokens.append(self.a, .{ .word = kept });
+            }
+        }
+    }
+
     fn plain(self: *Renderer, n: *Node, out: *std.ArrayList(u8)) Allocator.Error!void {
         var walker = ast.Walker.init(n);
         while (walker.next()) |ev| {
@@ -228,7 +249,7 @@ const Renderer = struct {
                 .linebreak => try tokens.append(self.a, .hard_break),
                 .code => {
                     try self.pushStyle(tokens, .code, true, "`");
-                    try self.addText(tokens, n.literal);
+                    try self.addCode(tokens, n.literal);
                     try self.pushStyle(tokens, .code, false, "`");
                 },
                 .html_inline => {},
@@ -257,7 +278,8 @@ const Renderer = struct {
         while (walker.next()) |ev| {
             if (!ev.entering) continue;
             switch (ev.node.kind) {
-                .text, .code => try self.addText(tokens, ev.node.literal),
+                .text => try self.addText(tokens, ev.node.literal),
+                .code => try self.addCode(tokens, ev.node.literal),
                 .softbreak => try tokens.append(self.a, .space),
                 .linebreak => try tokens.append(self.a, .hard_break),
                 else => {},
