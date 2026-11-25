@@ -391,3 +391,11 @@ test "spaces written as references stay before a line ending" {
         try std.testing.expectEqualStrings(case[1], out);
     }
 }
+
+test "a footnote reference inside link text does not undo the link" {
+    const gpa = std.testing.allocator;
+    const out = try renderWith(gpa, "[see [^1] here](/url)\n\n[^1]: n\n", .{ .footnotes = true });
+    defer gpa.free(out);
+    // As cmark-gfm does.
+    try std.testing.expect(std.mem.startsWith(u8, out, "<p><a href=\"/url\">see <sup class=\"footnote-ref\">"));
+}

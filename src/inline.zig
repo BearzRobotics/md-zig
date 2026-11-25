@@ -646,7 +646,7 @@ const Inl = struct {
             try self.processEmphasis(opener.prev_delim);
             self.brackets = opener.prev;
             opener.node.unlink();
-            if (!is_image) {
+            if (node.kind == .link) {
                 // Links may not contain links. Each bracket is visited once.
                 var o = self.brackets;
                 while (o) |b| : (o = b.prev) {

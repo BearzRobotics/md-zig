@@ -218,3 +218,7 @@ test "tags spanning lines, indented blocks in items and tags in later terms" {
     }, md.Extensions.all);
     try expectSameHtml(&.{ "<y\n    >\n", "-\n\t<script\n", "-\n   <c>\n" }, .{});
 }
+
+test "a footnote reference inside link text survives writing" {
+    try expectSameHtml(&.{"[see [^1] here](/url)\n\n[^1]: n\n"}, md.Extensions.all);
+}

@@ -34,6 +34,7 @@ Every difference that is found is recorded in the table below.
 | `~a b~~ c~` (an unmatched run of the other length between a pair) | GFM does not say | an audit suspected a bug | No change: md-zig already gives the same output as cmark-gfm. |
 | Footnote ids | HTML: ids are unique and `&` is escaped in attributes (footnotes are in neither Markdown spec) | a label `x-2` could repeat the id of the second use of `x`; `&` was not escaped | Keys are escaped. Only where an id would repeat, the suffix gets `-again`; otherwise the ids are those of cmark-gfm. |
 | Wide characters in the terminal | Unicode East Asian Width (UAX #11), version 16.0.0: W and F are two columns | hand-written ranges missed many emoji and widened some narrow characters | Follows the Unicode data: some pictographs it calls narrow now count as one column. |
+| A footnote reference inside link text | footnotes are in neither Markdown spec; CommonMark forbids links inside links | md-zig treated the reference as a link, so the outer link became text | Follows cmark-gfm: the outer link stands. Note that its HTML puts an `a` element inside another, which HTML does not allow. |
 
 ## Consequences
 
