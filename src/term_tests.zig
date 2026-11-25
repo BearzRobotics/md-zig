@@ -336,3 +336,13 @@ test "white space inside code spans is kept" {
     defer gpa.free(wrapped);
     try testing.expectEqualStrings("`aaaaaaaaaa\nbbbb  cccc dddd` end\n", wrapped);
 }
+
+test "widths below the minimum are honoured" {
+    const gpa = testing.allocator;
+    const out = try text(gpa, "one two three four five six seven eight\n", .{}, .{ .width = 10 });
+    defer gpa.free(out);
+    try testing.expectEqualStrings("one two\nthree four\nfive six\nseven\neight\n", out);
+    const quoted = try text(gpa, "> > > one two three\n", .{}, .{ .width = 10, .unicode = false });
+    defer gpa.free(quoted);
+    try testing.expectEqualStrings("> > > one two\n> > > three\n", quoted);
+}

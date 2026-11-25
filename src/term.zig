@@ -16,7 +16,10 @@ const Node = ast.Node;
 pub const Error = Io.Writer.Error || Allocator.Error;
 
 pub const TextOptions = struct {
-    /// Columns to wrap at; 0 means do not wrap.
+    /// Columns to wrap at; 0 means do not wrap. Words too long for a line
+    /// still overflow it, as do code and HTML blocks and tables that cannot be
+    /// narrowed further. Inside prefixes (lists, quotes) text keeps at least
+    /// 20 columns, or `width` if that is less.
     width: usize = 80,
     /// Use ANSI escape sequences for styles. Without them, emphasis is shown
     /// with Markdown markers.
@@ -104,7 +107,9 @@ const Renderer = struct {
     fn available(self: *const Renderer) usize {
         if (self.o.width == 0) return std.math.maxInt(usize) / 2;
         const used = self.prefixWidth();
-        return if (self.o.width > used + self.min_width) self.o.width - used else self.min_width;
+        // `min_width` keeps deeply indented text readable. It never makes a
+        // line wider than a width that was asked for below it.
+        return @max(self.o.width -| used, @min(self.min_width, self.o.width));
     }
 
     fn writePrefix(self: *Renderer, trim: bool) Error!void {
