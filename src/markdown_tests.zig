@@ -202,3 +202,11 @@ test "white space that is text survives at the ends of lines and blocks" {
 test "list numbers stay within nine digits" {
     try expectSameHtml(&.{"999999999. a\n999999999. b\n999999998) c\n999999999) d\n"}, .{});
 }
+
+test "front matter fences are written as they were typed" {
+    for ([_][]const u8{ "--- \na: 1\n...\n\n# Hi\n", "---\n--- \t\n", "---\na\n---\n" }) |src| {
+        const out = try written(src, .{ .front_matter = true });
+        defer std.testing.allocator.free(out);
+        try std.testing.expectEqualStrings(src, out);
+    }
+}

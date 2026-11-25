@@ -95,7 +95,8 @@ pub const Node = struct {
     /// Text of `text`, `code`, `html_inline`, `html_block` and `code_block`
     /// nodes; the destination of `link` and `image` nodes.
     literal: []const u8 = "",
-    /// Title of `link` and `image`; info string of `code_block`.
+    /// Title of `link` and `image`; info string of `code_block`; for
+    /// `front_matter`, its two fence lines with a `\n` between them.
     title: []const u8 = "",
     /// Level (1 to 6) of a heading.
     level: u8 = 0,

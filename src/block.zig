@@ -724,6 +724,8 @@ pub const Parser = struct {
                     const n = try self.newNode(.front_matter);
                     n.line = 1;
                     n.literal = body.items;
+                    // The two fence lines as typed, for the Markdown writer.
+                    n.title = try std.mem.concat(self.a, u8, &.{ self.fm_lines.items[0], "\n", ln });
                     n.build.open = false;
                     self.doc.appendChild(n);
                     self.fm_state = .done;

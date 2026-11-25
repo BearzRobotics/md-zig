@@ -124,7 +124,13 @@ const Gen = struct {
             // `_` is never a list marker, so no marker before this can join it.
             .thematic_break => return "___\n",
             .html_block => return self.line(n.literal),
-            .front_matter => return try std.fmt.allocPrint(self.a, "---\n{s}---\n", .{n.literal}),
+            .front_matter => {
+                // A tree built elsewhere may not say how the fences were typed.
+                var fences = std.mem.splitScalar(u8, n.title, '\n');
+                const open = if (n.title.len != 0) fences.first() else "---";
+                const close = fences.next() orelse "---";
+                return try std.fmt.allocPrint(self.a, "{s}\n{s}{s}\n", .{ open, n.literal, close });
+            },
             .code_block => return self.codeBlock(n),
             .block_quote => {
                 const inner = try self.blocks(n, false);
