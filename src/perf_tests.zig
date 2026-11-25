@@ -33,3 +33,8 @@ test "time: unterminated raw HTML openers" {
         try withinBudget("a ", opener, 400_000, "\n", .{});
     }
 }
+
+test "time: repeated link openers with unbalanced parentheses" {
+    try withinBudget("", "[a](", 400_000, "\n", .{});
+    try withinBudget("", "[a](b", 400_000, "\n", .{});
+}

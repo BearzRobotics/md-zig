@@ -177,3 +177,13 @@ test "definition lists nest, mix with other blocks and do not leak" {
         gpa.free(t);
     }
 }
+
+test "parentheses in a link destination are limited to 32 levels" {
+    const gpa = std.testing.allocator;
+    inline for (.{ .{ 32, true }, .{ 33, false } }) |case| {
+        const src = "[a](u" ++ @as([case[0]]u8, @splat('(')) ++ @as([case[0]]u8, @splat(')')) ++ ")\n";
+        const out = try render(gpa, src);
+        defer gpa.free(out);
+        try std.testing.expectEqual(case[1], std.mem.find(u8, out, "<a ") != null);
+    }
+}

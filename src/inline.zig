@@ -16,6 +16,11 @@ const Node = ast.Node;
 pub const Ref = struct { destination: []const u8, title: []const u8 };
 pub const RefMap = std.StringHashMapUnmanaged(Ref);
 
+/// Deepest parentheses accepted in a bare link destination. CommonMark lets an
+/// implementation limit them (to no less than three); cmark uses 32. Without a
+/// limit, repeated `[a](` takes quadratic time.
+pub const max_paren_depth = 32;
+
 /// Every use of a reference repeats its destination and title in the output,
 /// so their total is limited (otherwise output grows with the product of the
 /// definition's length and the number of uses). This is the smallest limit.
@@ -484,6 +489,7 @@ const Inl = struct {
             if (c == '\\' and p + 1 < s.len and unicode.isAsciiPunct(s[p + 1])) {
                 p += 2;
             } else if (c == '(') {
+                if (depth == max_paren_depth) return null;
                 depth += 1;
                 p += 1;
             } else if (c == ')') {
