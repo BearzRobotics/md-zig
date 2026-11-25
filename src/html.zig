@@ -101,6 +101,20 @@ const Renderer = struct {
         try self.lit(s[start..]);
     }
 
+    /// `s` HTML escaped, in memory.
+    fn escaped(self: *Renderer, s: []const u8) Error![]const u8 {
+        var buf: Io.Writer.Allocating = .init(self.arena);
+        const w = self.w;
+        const last = self.last;
+        self.w = &buf.writer;
+        defer {
+            self.w = w;
+            self.last = last;
+        }
+        try self.esc(s);
+        return buf.written();
+    }
+
     /// Raw HTML, with the tags GFM disallows shown as text when `tagfilter` is on.
     fn raw(self: *Renderer, s: []const u8) Error!void {
         if (self.safe) return self.lit("<!-- raw HTML omitted -->");
@@ -153,9 +167,16 @@ const Renderer = struct {
         }
     }
 
-    fn firstRefSuffix(buf: []u8, n: usize) []const u8 {
+    /// What follows the label in the id of the `n`th reference to footnote
+    /// `key`: nothing for the first, then `-n`. Where that would be the id of a
+    /// footnote labelled `key-n`, `-again` is added, since ids must be unique.
+    fn refSuffix(self: *Renderer, key: []const u8, n: usize) Allocator.Error![]const u8 {
         if (n <= 1) return "";
-        return std.fmt.bufPrint(buf, "-{d}", .{n}) catch "";
+        var suffix = try std.fmt.allocPrint(self.arena, "-{d}", .{n});
+        while (self.defs.contains(try std.mem.concat(self.arena, u8, &.{ key, suffix }))) {
+            suffix = try std.mem.concat(self.arena, u8, &.{ suffix, "-again" });
+        }
+        return suffix;
     }
 
     /// The index in `used` of the footnote `key`, which is added on its first
@@ -206,15 +227,14 @@ const Renderer = struct {
         const u = &self.used.items[at];
         u.refs += 1;
         const key = try text.encodeUrl(self.arena, n.literal);
-        var nb: [24]u8 = undefined;
-        const suffix = firstRefSuffix(&nb, u.refs);
+        const suffix = try self.refSuffix(n.literal, u.refs);
         var ib: [24]u8 = undefined;
         const idx = std.fmt.bufPrint(&ib, "{d}", .{at + 1}) catch unreachable;
         try self.lit("<sup class=\"footnote-ref\"><a href=\"#fn-");
-        try self.lit(key);
+        try self.esc(key);
         try self.lit("\" id=\"fnref-");
-        try self.lit(key);
-        try self.lit(suffix);
+        try self.esc(key);
+        try self.esc(suffix);
         try self.lit("\" data-footnote-ref>");
         try self.lit(idx);
         try self.lit("</a></sup>");
@@ -229,7 +249,7 @@ const Renderer = struct {
         var i: usize = 0;
         while (i < self.used.items.len) : (i += 1) {
             const u = self.used.items[i];
-            const key = try text.encodeUrl(self.arena, u.key);
+            const key = try self.escaped(try text.encodeUrl(self.arena, u.key));
             try self.lit("<li id=\"fn-");
             try self.lit(key);
             try self.lit("\">\n");
@@ -238,8 +258,7 @@ const Renderer = struct {
             var k: usize = 1;
             while (k <= u.total) : (k += 1) {
                 if (k > 1) try back.append(self.arena, ' ');
-                var sb: [24]u8 = undefined;
-                const suffix = firstRefSuffix(&sb, k);
+                const suffix = try self.escaped(try self.refSuffix(u.key, k));
                 var ib: [48]u8 = undefined;
                 const idx = if (k == 1)
                     std.fmt.bufPrint(&ib, "{d}", .{i + 1}) catch unreachable

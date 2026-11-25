@@ -354,3 +354,24 @@ test "a footnote definition nested in another is not part of it" {
     defer gpa.free(used);
     try std.testing.expect(std.mem.find(u8, used, "<li id=\"fn-2\">\n<p>two ") != null);
 }
+
+test "footnote ids are escaped and unique" {
+    const gpa = std.testing.allocator;
+    const amp = try renderWith(gpa, "a[^a&b]\n\n[^a&b]: one\n", .{ .footnotes = true });
+    defer gpa.free(amp);
+    try std.testing.expect(std.mem.find(u8, amp, "a&b") == null);
+    try std.testing.expectEqual(@as(usize, 4), std.mem.count(u8, amp, "a&amp;b"));
+
+    // The second use of `x` must not take the id of the footnote `x-2`.
+    const out = try renderWith(gpa, "a[^x] b[^x] c[^x-2]\n\n[^x]: one\n[^x-2]: two\n", .{ .footnotes = true });
+    defer gpa.free(out);
+    var it = std.mem.splitSequence(u8, out, " id=\"");
+    _ = it.next();
+    var ids: std.StringHashMapUnmanaged(void) = .empty;
+    defer ids.deinit(gpa);
+    while (it.next()) |rest| {
+        const id = rest[0..std.mem.findScalar(u8, rest, '"').?];
+        try std.testing.expect(!(try ids.getOrPut(gpa, id)).found_existing);
+    }
+    try std.testing.expect(std.mem.find(u8, out, "href=\"#fnref-x-2-again\"") != null);
+}

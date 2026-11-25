@@ -32,6 +32,7 @@ Every difference that is found is recorded in the table below.
 | Tabs around link destinations and titles | CommonMark 4.7 and 6.3: spaces or tabs | only spaces were accepted | Follows the spec. |
 | What ends a table | GFM: the first empty line "or beginning of another block-level structure" | only quotes, headings and fences ended it | Follows the spec: also thematic breaks, list items, HTML blocks and indented code, matching cmark-gfm. Footnote definitions and `: ` lines, which the spec does not cover, stay rows (footnotes as in cmark-gfm). |
 | `~a b~~ c~` (an unmatched run of the other length between a pair) | GFM does not say | an audit suspected a bug | No change: md-zig already gives the same output as cmark-gfm. |
+| Footnote ids | HTML: ids are unique and `&` is escaped in attributes (footnotes are in neither Markdown spec) | a label `x-2` could repeat the id of the second use of `x`; `&` was not escaped | Keys are escaped. Only where an id would repeat, the suffix gets `-again`; otherwise the ids are those of cmark-gfm. |
 
 ## Consequences
 
