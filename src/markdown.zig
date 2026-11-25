@@ -272,8 +272,12 @@ const Gen = struct {
             @memset(pad, ' ');
             if (it.task != .none and self.ext.task_lists) {
                 const box: []const u8 = if (it.task == .checked) "[x]" else "[ ]";
-                // The box shares a line only with a paragraph's text.
-                const text_follows = if (it.first_child) |f| f.kind == .paragraph else false;
+                // The box shares a line only with text: a paragraph's, or the
+                // first term of a definition list.
+                const text_follows = if (it.first_child) |f|
+                    f.kind == .paragraph or (f.kind == .deflist and f.first_child != null and f.first_child.?.kind == .deflist_term)
+                else
+                    false;
                 const between: []const u8 = if (text_follows) " " else "\n";
                 // Without a paragraph, a box alone would make an empty one. A
                 // link reference definition, which shows nothing, does not.
@@ -504,8 +508,16 @@ const Gen = struct {
 
     /// Whether `written`, parsed as inline content, renders to `want`.
     fn readsAs(self: *Gen, written: []const u8, footnotes: *html.Footnotes, want: []const u8) Error!bool {
+        // As the block parser will: continuation lines lose their indent.
+        var content: std.ArrayList(u8) = .empty;
+        var lines = std.mem.splitScalar(u8, written, '\n');
+        try content.appendSlice(self.a, lines.first());
+        while (lines.next()) |l| {
+            try content.append(self.a, '\n');
+            try content.appendSlice(self.a, std.mem.trimStart(u8, l, " \t"));
+        }
         const node = try self.a.create(Node);
-        node.* = .{ .kind = .paragraph, .literal = written };
+        node.* = .{ .kind = .paragraph, .literal = content.items };
         var refs: inl.RefMap = .empty;
         var nodes: ast.NodeBudget = .{ .left = std.math.maxInt(usize) };
         try inl.processTree(self.a, node, &refs, footnotes, self.ext, 0, &nodes);

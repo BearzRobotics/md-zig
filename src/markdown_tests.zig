@@ -271,3 +271,7 @@ test "empty nested items, bare task boxes, and indented HTML around definitions"
 test "a footnote reference followed by a colon stays a reference" {
     try expectSameHtml(&.{ "- [x] [^1]:<\n\n[^1]:\n", "[r]: /u\n[^1]:x\n", "+ [ ]\n  : \n" }, md.Extensions.all);
 }
+
+test "a task box before a term; emphasis around a tag that spans lines" {
+    try expectSameHtml(&.{ "+ [ ] >\n  : \n", "- [x] T\n  : d\n", "*<!m\n->&#32;*\n", "**a <b\n> c** d*e*\n" }, md.Extensions.all);
+}
