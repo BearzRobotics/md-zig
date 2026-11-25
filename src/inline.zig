@@ -50,6 +50,8 @@ const Bracket = struct {
 const Inl = struct {
     a: Allocator,
     refs: *const RefMap,
+    /// Null only where no nodes are made (`parseReference`).
+    nodes: ?*ast.NodeBudget = null,
     /// Bytes that references may still add. Past it they stay text.
     ref_budget: ?*usize = null,
     ext: opts.Extensions = .{},
@@ -68,9 +70,7 @@ const Inl = struct {
     }
 
     fn newNode(self: *Inl, kind: ast.Kind) Allocator.Error!*Node {
-        const n = try self.a.create(Node);
-        n.* = .{ .kind = kind };
-        return n;
+        return self.nodes.?.create(self.a, .{ .kind = kind });
     }
 
     fn newText(self: *Inl, s: []const u8) Allocator.Error!*Node {
@@ -715,6 +715,7 @@ pub fn processTree(
     footnotes: *const std.StringHashMapUnmanaged(*Node),
     ext: opts.Extensions,
     ref_budget: usize,
+    nodes: *ast.NodeBudget,
 ) Allocator.Error!void {
     var budget = ref_budget;
     var walker = ast.Walker.init(root);
@@ -726,6 +727,7 @@ pub fn processTree(
                 var p: Inl = .{
                     .a = a,
                     .refs = refs,
+                    .nodes = nodes,
                     .ref_budget = &budget,
                     .ext = ext,
                     .footnotes = footnotes,
@@ -733,7 +735,7 @@ pub fn processTree(
                 };
                 node.literal = "";
                 try p.parseAll(node);
-                if (ext.autolinks) try autolink.process(a, node);
+                if (ext.autolinks) try autolink.process(a, node, nodes);
             },
             else => {},
         }

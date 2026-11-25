@@ -24,6 +24,7 @@ pub const Parser = struct {
     last_matched: *Node,
     refs: inl.RefMap = .empty,
     ext: opts.Extensions,
+    nodes: ast.NodeBudget = .{ .left = std.math.maxInt(usize) },
     /// Bytes of input seen, which sets the reference expansion budget.
     input_bytes: usize = 0,
     /// Empty cells that short table rows will be padded with, so far.
@@ -66,9 +67,12 @@ pub const Parser = struct {
     }
 
     fn newNode(self: *Parser, kind: ast.Kind) Allocator.Error!*Node {
-        const n = try self.a.create(Node);
-        n.* = .{ .kind = kind, .line = self.line_number };
-        return n;
+        return self.nodes.create(self.a, .{ .kind = kind, .line = self.line_number });
+    }
+
+    /// What an `OutOfMemory` from the parser means to the caller.
+    pub fn failure(self: *const Parser, e: Allocator.Error) error{ OutOfMemory, InputTooLarge } {
+        return if (self.nodes.exceeded) error.InputTooLarge else e;
     }
 
     fn findNextNonspace(self: *Parser) void {
@@ -1096,7 +1100,7 @@ pub const Parser = struct {
         // As in cmark: references may add as many bytes as the input has,
         // and always at least `inl.min_ref_expansion`.
         const budget = @max(self.input_bytes, inl.min_ref_expansion);
-        try inl.processTree(self.a, self.doc, &self.refs, &self.footnotes, self.ext, budget);
+        try inl.processTree(self.a, self.doc, &self.refs, &self.footnotes, self.ext, budget, &self.nodes);
     }
 };
 

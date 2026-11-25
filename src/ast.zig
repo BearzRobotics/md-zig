@@ -41,6 +41,26 @@ pub const Kind = enum {
     deflist_def,
 };
 
+/// Limits how many nodes the parser may make, since a node costs far more
+/// memory than the input bytes that cause it.
+pub const NodeBudget = struct {
+    left: usize,
+    /// Set when the budget ran out. The parser then reports `OutOfMemory`
+    /// internally, and this tells the two apart.
+    exceeded: bool = false,
+
+    pub fn create(self: *NodeBudget, a: std.mem.Allocator, value: Node) std.mem.Allocator.Error!*Node {
+        if (self.left == 0) {
+            self.exceeded = true;
+            return error.OutOfMemory;
+        }
+        self.left -= 1;
+        const n = try a.create(Node);
+        n.* = value;
+        return n;
+    }
+};
+
 pub const Align = enum { none, left, center, right };
 
 pub const Task = enum { none, unchecked, checked };

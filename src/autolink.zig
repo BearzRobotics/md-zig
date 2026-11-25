@@ -191,7 +191,7 @@ fn find(s: []const u8, from: usize) ?Match {
 
 /// Replaces autolink candidates in the text nodes below `block` (outside
 /// links and images) with link nodes.
-pub fn process(a: Allocator, block: *Node) Allocator.Error!void {
+pub fn process(a: Allocator, block: *Node, nodes: *ast.NodeBudget) Allocator.Error!void {
     try mergeText(a, block);
     var walker = ast.Walker.init(block);
     var in_link: usize = 0;
@@ -200,7 +200,7 @@ pub fn process(a: Allocator, block: *Node) Allocator.Error!void {
             .link, .image => {
                 if (ev.entering) in_link += 1 else in_link -= 1;
             },
-            .text => if (ev.entering and in_link == 0) try splitText(a, ev.node),
+            .text => if (ev.entering and in_link == 0) try splitText(a, ev.node, nodes),
             else => {},
         }
     }
@@ -234,21 +234,18 @@ fn mergeText(a: Allocator, root: *Node) Allocator.Error!void {
     }
 }
 
-fn splitText(a: Allocator, first: *Node) Allocator.Error!void {
+fn splitText(a: Allocator, first: *Node, nodes: *ast.NodeBudget) Allocator.Error!void {
     var node = first;
     var from: usize = 0;
     while (find(node.literal, from)) |m| {
         const s = node.literal;
         const shown = s[m.start..m.end];
-        const link = try a.create(Node);
-        link.* = .{ .kind = .link };
+        const link = try nodes.create(a, .{ .kind = .link });
         link.literal = try text.encodeUrl(a, try std.mem.concat(a, u8, &.{ m.prefix, shown }));
-        const label = try a.create(Node);
-        label.* = .{ .kind = .text, .literal = shown };
+        const label = try nodes.create(a, .{ .kind = .text, .literal = shown });
         link.appendChild(label);
 
-        const rest = try a.create(Node);
-        rest.* = .{ .kind = .text, .literal = s[m.end..] };
+        const rest = try nodes.create(a, .{ .kind = .text, .literal = s[m.end..] });
         node.literal = s[0..m.start];
         node.insertAfter(link);
         link.insertAfter(rest);

@@ -40,6 +40,10 @@ pub const Options = struct {
     max_bytes: usize = 64 * 1024 * 1024,
     /// Longest accepted line, in bytes.
     max_line_bytes: usize = 4 * 1024 * 1024,
+    /// Most nodes the tree may have. This is what bounds memory: allow about
+    /// 250 bytes for each (about 1 GB at the default). Ordinary text needs one
+    /// node for some tens of bytes, dense markup one for a few bytes.
+    max_nodes: usize = 4_000_000,
     /// Most empty cells added, in the whole document, to table rows that are
     /// shorter than their header. Without a limit, memory grows with columns
     /// times rows. A table ends before the row that would pass the limit.

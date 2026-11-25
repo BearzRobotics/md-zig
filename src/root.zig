@@ -34,7 +34,8 @@ pub const ParseError = error{
     ReadFailed,
     /// A line is longer than `Options.max_line_bytes`.
     LineTooLong,
-    /// The input is longer than `Options.max_bytes`.
+    /// The input is longer than `Options.max_bytes`, or its tree would have
+    /// more than `Options.max_nodes` nodes.
     InputTooLarge,
 };
 
@@ -57,6 +58,8 @@ pub const Document = struct {
         errdefer arena.deinit();
         var parser = try block.Parser.init(arena.allocator(), options.extensions);
         parser.max_padded_cells = options.max_padded_cells;
+        // The document node is already made.
+        parser.nodes.left = options.max_nodes -| 1;
 
         var line: Io.Writer.Allocating = .init(gpa);
         defer line.deinit();
@@ -79,10 +82,10 @@ pub const Document = struct {
 
             total += text.len + 1;
             if (total > options.max_bytes) return error.InputTooLarge;
-            try feedLine(&parser, arena.allocator(), text);
+            feedLine(&parser, arena.allocator(), text) catch |e| return parser.failure(e);
             if (!have_newline) break;
         }
-        try parser.finish();
+        parser.finish() catch |e| return parser.failure(e);
         return .{ .arena = arena, .root = parser.doc, .extensions = options.extensions, .footnotes = parser.footnotes };
     }
 

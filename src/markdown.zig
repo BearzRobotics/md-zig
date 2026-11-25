@@ -34,12 +34,13 @@ pub const max_depth = 200;
 pub fn write(gpa: Allocator, root: *Node, ext: Extensions, w: *Io.Writer) Error!void {
     var arena = std.heap.ArenaAllocator.init(gpa);
     defer arena.deinit();
-    var g: Gen = .{ .a = arena.allocator(), .ext = ext };
+    var g: Gen = .{ .gpa = gpa, .a = arena.allocator(), .ext = ext };
     const out = try g.blocks(root, false);
     try w.writeAll(out);
 }
 
 const Gen = struct {
+    gpa: Allocator,
     a: Allocator,
     ext: Extensions,
     depth: u32 = 0,
@@ -57,14 +58,23 @@ const Gen = struct {
     fn blocks(self: *Gen, parent: *Node, tight: bool) Error![]const u8 {
         try self.enter();
         defer self.depth -= 1;
+        const result = self.a;
         var out: std.ArrayList(u8) = .empty;
+        // Each child's working memory is freed once its text is in `out`.
+        // Otherwise every level of nesting would keep its own copy of all the
+        // text below it.
+        var scratch = std.heap.ArenaAllocator.init(self.gpa);
+        defer scratch.deinit();
         var child = parent.first_child;
         var prev: ?*Node = null;
         while (child) |c| : (child = c.next) {
-            if (prev != null and !tight) try out.append(self.a, '\n');
+            if (prev != null and !tight) try out.append(result, '\n');
+            _ = scratch.reset(.retain_capacity);
+            self.a = scratch.allocator();
+            defer self.a = result;
             const text = try self.block(c, prev);
-            try out.appendSlice(self.a, text);
-            if (text.len == 0 or text[text.len - 1] != '\n') try out.append(self.a, '\n');
+            try out.appendSlice(result, text);
+            if (text.len == 0 or text[text.len - 1] != '\n') try out.append(result, '\n');
             prev = c;
         }
         return out.items;

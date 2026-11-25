@@ -277,3 +277,28 @@ test "ordinary use of references stays within the budget" {
     defer doc.deinit();
     try testing.expectEqual(@as(usize, 2000), countKind(doc.root, .link));
 }
+
+test "the number of nodes is limited" {
+    const gpa = testing.allocator;
+    // One node of each way of making them: blocks, inlines, cells, autolinks.
+    const src = "- *a* www.b.com\n\n| c |\n| - |\n| d |\n\nT\n: e\n";
+    var doc = try md.Document.parse(gpa, src, .{ .extensions = md.Extensions.all });
+    var count: usize = 0;
+    var walker = md.Walker.init(doc.root);
+    while (walker.next()) |ev| {
+        if (ev.entering) count += 1;
+    }
+    doc.deinit();
+    // The parser also makes nodes that it removes again, so the exact
+    // threshold lies at or above the size of the finished tree.
+    var needed: usize = 1;
+    while (needed < 10 * count) : (needed += 1) {
+        var d = md.Document.parse(gpa, src, .{ .extensions = md.Extensions.all, .max_nodes = needed }) catch |e| {
+            try testing.expectEqual(error.InputTooLarge, e);
+            continue;
+        };
+        d.deinit();
+        break;
+    }
+    try testing.expect(needed >= count and needed < 10 * count);
+}
