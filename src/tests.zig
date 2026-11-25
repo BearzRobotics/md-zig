@@ -375,3 +375,19 @@ test "footnote ids are escaped and unique" {
     }
     try std.testing.expect(std.mem.find(u8, out, "href=\"#fnref-x-2-again\"") != null);
 }
+
+test "spaces written as references stay before a line ending" {
+    const gpa = std.testing.allocator;
+    // As cmark does.
+    for ([_][2][]const u8{
+        .{ "a&#32;\nb\n", "<p>a \nb</p>\n" },
+        .{ "a&#32;&#32;\nb\n", "<p>a  \nb</p>\n" },
+        .{ "a&#32;  \nb\n", "<p>a <br />\nb</p>\n" },
+        .{ "a&#32; \nb\n", "<p>a \nb</p>\n" },
+        .{ "a   \nb\n", "<p>a<br />\nb</p>\n" },
+    }) |case| {
+        const out = try render(gpa, case[0]);
+        defer gpa.free(out);
+        try std.testing.expectEqualStrings(case[1], out);
+    }
+}

@@ -132,13 +132,16 @@ const Inl = struct {
     }
 
     fn parseNewline(self: *Inl, block: *Node) Allocator.Error!bool {
+        // Spaces typed at the end of the line. Ones written as `&#32;` are text
+        // and do not count.
+        var spaces: usize = 0;
+        while (spaces < self.pos and self.subject[self.pos - 1 - spaces] == ' ') spaces += 1;
         self.pos += 1; // the newline
-        var hard = false;
-        if (block.last_child) |last| {
-            if (last.kind == .text and last.literal.len > 0 and last.literal[last.literal.len - 1] == ' ') {
-                hard = last.literal.len >= 2 and last.literal[last.literal.len - 2] == ' ';
-                last.literal = std.mem.trimEnd(u8, last.literal, " ");
-            }
+        const hard = spaces >= 2;
+        if (spaces > 0) {
+            // They end the text node made from the same stretch of the source.
+            const last = block.last_child.?;
+            last.literal = last.literal[0 .. last.literal.len - spaces];
         }
         block.appendChild(try self.newNode(if (hard) .linebreak else .softbreak));
         // Leading spaces of the next line are dropped.
