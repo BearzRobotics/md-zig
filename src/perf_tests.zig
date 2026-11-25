@@ -47,3 +47,8 @@ test "time: many open brackets before many links" {
         try withinBudget(head.items, "[a](b)", 100_000, "\n", .{});
     }
 }
+
+test "time: autolink candidates" {
+    try withinBudget("", "_www.", 200_000, "_a_b\n", md.Extensions.gfm);
+    try withinBudget("www.a.com", ")", 400_000, "\n", md.Extensions.gfm);
+}

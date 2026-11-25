@@ -22,34 +22,59 @@ fn isDomainChar(c: u8) bool {
     return std.ascii.isAlphanumeric(c) or c == '-' or c == '_' or c == '.' or c >= 0x80;
 }
 
-/// The end of a valid host name starting at `s[i]`, or null. Underscores are
-/// not allowed in either of the last two labels.
-fn domainEnd(s: []const u8, i: usize) ?usize {
-    var p = i;
-    while (p < s.len and isDomainChar(s[p])) p += 1;
-    if (p == i) return null;
-    const host = s[i..p];
-    var labels = std.mem.splitBackwardsScalar(u8, host, '.');
-    var seen: usize = 0;
-    while (labels.next()) |l| : (seen += 1) {
-        if (seen < 2 and std.mem.findScalar(u8, l, '_') != null) return null;
+/// What the last host scan found. Candidates inside one run of domain
+/// characters share its end and its last two labels, so the run is read once.
+const Host = struct {
+    start: usize = 0,
+    end: usize = 0,
+    /// The rightmost `_` in the last two labels.
+    underscore: ?usize = null,
+
+    fn scan(s: []const u8, i: usize) Host {
+        var p = i;
+        while (p < s.len and isDomainChar(s[p])) p += 1;
+        var h: Host = .{ .start = i, .end = p };
+        var q = p;
+        var dots: usize = 0;
+        while (q > i) {
+            q -= 1;
+            if (s[q] == '.') {
+                dots += 1;
+                if (dots == 2) break;
+            } else if (s[q] == '_') {
+                h.underscore = q;
+                break;
+            }
+        }
+        return h;
     }
-    return p;
+};
+
+/// The end of a valid host name starting at `s[i]`, or null. Underscores are
+/// not allowed in either of the last two labels. `i` must not decrease between
+/// calls that share `host`.
+fn domainEnd(s: []const u8, i: usize, host: *Host) ?usize {
+    if (i < host.start or i >= host.end) host.* = .scan(s, i);
+    if (host.end <= i) return null;
+    if (host.underscore) |u| if (u >= i) return null;
+    return host.end;
 }
 
 /// Cuts trailing punctuation and unbalanced `)` off a link, as GFM requires.
 fn trimEnd(s: []const u8, start: usize, end_in: usize) usize {
     var end = end_in;
+    // Counted once; only `)` removed from the end changes them.
+    var open: usize = 0;
+    var close: usize = 0;
+    for (s[start..end]) |ch| {
+        if (ch == '(') open += 1;
+        if (ch == ')') close += 1;
+    }
     while (end > start) {
         const c = s[end - 1];
         if (c == ')') {
-            var open: usize = 0;
-            var close: usize = 0;
-            for (s[start..end]) |ch| {
-                if (ch == '(') open += 1;
-                if (ch == ')') close += 1;
-            }
             if (close <= open) break;
+            close -= 1;
             end -= 1;
         } else if (std.mem.findScalar(u8, "?!.,:*_~'\"", c) != null) {
             end -= 1;
@@ -97,6 +122,7 @@ fn emailDomainEnd(s: []const u8, i: usize) ?usize {
 /// Finds the first autolink in `s` at or after `from`.
 fn find(s: []const u8, from: usize) ?Match {
     var i = from;
+    var host: Host = .{};
     while (i < s.len) : (i += 1) {
         const prev: u8 = if (i == 0) ' ' else s[i - 1];
         const c = s[i];
@@ -105,7 +131,7 @@ fn find(s: []const u8, from: usize) ?Match {
         if ((c == 'w' or c == 'W') and startsWithNoCase(s[i..], "www.") and
             (text.isWhitespace(prev) or std.mem.findScalar(u8, "*_~(", prev) != null))
         {
-            if (domainEnd(s, i + 4)) |d| {
+            if (domainEnd(s, i + 4, &host)) |d| {
                 var end = d;
                 while (end < s.len and !text.isWhitespace(s[end]) and s[end] != '<') end += 1;
                 end = trimEnd(s, i, end);
@@ -117,7 +143,7 @@ fn find(s: []const u8, from: usize) ?Match {
         if (!std.ascii.isAlphanumeric(prev)) {
             inline for (.{ "https://", "http://", "ftp://" }) |scheme| {
                 if (startsWithNoCase(s[i..], scheme)) {
-                    if (domainEnd(s, i + scheme.len)) |d| {
+                    if (domainEnd(s, i + scheme.len, &host)) |d| {
                         var end = d;
                         while (end < s.len and !text.isWhitespace(s[end]) and s[end] != '<') end += 1;
                         end = trimEnd(s, i, end);
