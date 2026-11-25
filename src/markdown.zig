@@ -267,6 +267,14 @@ const Gen = struct {
                 try out.append(self.a, '\n');
                 continue;
             }
+            if (inner[0] == ' ') {
+                // Spaces after the marker would count as part of it, so an
+                // indented first line starts on the next one.
+                try out.appendSlice(self.a, std.mem.trimEnd(u8, marker, " "));
+                try out.append(self.a, '\n');
+                try out.appendSlice(self.a, try self.prefixed(inner, pad, pad));
+                continue;
+            }
             try out.appendSlice(self.a, try self.prefixed(inner, marker, pad));
         }
         return out.items;
@@ -371,7 +379,10 @@ const Gen = struct {
     /// renders as the original does.
     fn leaf(self: *Gen, parent: *Node, ctx: Ctx) Error![]const u8 {
         const spelled = try self.spell(parent, ctx);
-        return if (ctx == .paragraph) self.guardLines(spelled) else spelled;
+        if (ctx != .paragraph) return spelled;
+        // A term after another term continues the same paragraph.
+        const continues = parent.kind == .deflist_term and parent.prev != null and parent.prev.?.kind == .deflist_term;
+        return self.guardLines(spelled, !continues);
     }
 
     /// Keeps a line of a paragraph that starts with inline HTML from being read
@@ -379,13 +390,14 @@ const Gen = struct {
     /// and the indent of a continuation line is not part of its text. The first
     /// line cannot be indented (it would be code), so a link reference
     /// definition, which shows nothing, goes before it.
-    fn guardLines(self: *Gen, s: []const u8) Error![]const u8 {
+    fn guardLines(self: *Gen, s: []const u8, starts_paragraph: bool) Error![]const u8 {
         if (std.mem.findScalar(u8, s, '<') == null) return s;
         var out: std.ArrayList(u8) = .empty;
         var lines = std.mem.splitScalar(u8, s, '\n');
-        var first = true;
-        while (lines.next()) |l| : (first = false) {
-            if (!first) try out.append(self.a, '\n');
+        var index: usize = 0;
+        while (lines.next()) |l| : (index += 1) {
+            if (index != 0) try out.append(self.a, '\n');
+            const first = index == 0 and starts_paragraph;
             const t = std.mem.trimStart(u8, l, " ");
             const kind = if (l.len - t.len < 4) block_parser.htmlBlockKind(t) else 0;
             // Only kinds 1 to 6 can interrupt a paragraph.
@@ -519,7 +531,12 @@ const Gen = struct {
         switch (n.kind) {
             .text => try self.escape(&out, n.literal, n.next, bol),
             .code => try self.codeSpan(&out, n.literal),
-            .html_inline => try out.appendSlice(self.a, n.literal),
+            .html_inline => for (n.literal) |byte| {
+                try out.append(self.a, byte);
+                // A later line of a tag must not start a block. The indent of a
+                // continuation line is not part of the text.
+                if (byte == '\n' and ctx == .paragraph) try out.appendSlice(self.a, "    ");
+            },
             .emph, .strong, .strikethrough => try self.emphasis(&out, n, ctx),
             .link, .image => {
                 if (n.kind == .image) try out.append(self.a, '!');

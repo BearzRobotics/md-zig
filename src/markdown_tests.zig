@@ -210,3 +210,11 @@ test "front matter fences are written as they were typed" {
         try std.testing.expectEqualStrings(src, out);
     }
 }
+
+test "tags spanning lines, indented blocks in items and tags in later terms" {
+    try expectSameHtml(&.{
+        "<y\n    >\n",  "a <y\n    - >\n",     "*\n\t<div\n", "-\n\t<script\n", "1.\n\t<script\n", "-\n   <c>\n",
+        "&\n<b>\n: \n", "a\n    <div>\n: d\n",
+    }, md.Extensions.all);
+    try expectSameHtml(&.{ "<y\n    >\n", "-\n\t<script\n", "-\n   <c>\n" }, .{});
+}
