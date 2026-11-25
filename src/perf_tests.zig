@@ -38,3 +38,12 @@ test "time: repeated link openers with unbalanced parentheses" {
     try withinBudget("", "[a](", 400_000, "\n", .{});
     try withinBudget("", "[a](b", 400_000, "\n", .{});
 }
+
+test "time: many open brackets before many links" {
+    for ([_][]const u8{ "[", "![" }) |opener| {
+        var head: std.ArrayList(u8) = .empty;
+        defer head.deinit(testing.allocator);
+        for (0..100_000) |_| try head.appendSlice(testing.allocator, opener);
+        try withinBudget(head.items, "[a](b)", 100_000, "\n", .{});
+    }
+}

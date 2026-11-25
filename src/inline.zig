@@ -59,6 +59,9 @@ const Inl = struct {
     html_misses: scan.Misses = .{},
     delims: ?*Delim = null,
     brackets: ?*Bracket = null,
+    /// Brackets that start at or before this index no longer need deactivating
+    /// (a link was found after them, so it was done then).
+    inactive_up_to: ?usize = null,
 
     fn peek(self: *const Inl) ?u8 {
         return if (self.pos < self.subject.len) self.subject[self.pos] else null;
@@ -630,10 +633,13 @@ const Inl = struct {
             self.brackets = opener.prev;
             opener.node.unlink();
             if (!is_image) {
+                // Links may not contain links. Each bracket is visited once.
                 var o = self.brackets;
                 while (o) |b| : (o = b.prev) {
+                    if (self.inactive_up_to) |done| if (b.index <= done) break;
                     if (!b.image) b.active = false;
                 }
+                if (self.brackets) |top| self.inactive_up_to = top.index;
             }
             return true;
         }
