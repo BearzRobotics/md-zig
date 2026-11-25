@@ -1,6 +1,8 @@
 //! md-zig build script. `zig build test` runs all tests.
 
 const std = @import("std");
+/// The one place the version is written.
+const version = @import("build.zig.zon").version;
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
@@ -44,6 +46,10 @@ pub fn build(b: *std.Build) void {
         // System C toolchains link position independent executables.
         .pic = true,
     });
+    const capi_options = b.addOptions();
+    capi_options.addOption([]const u8, "version", version);
+    capi_mod.addOptions("build_options", capi_options);
+    const expected_version = b.fmt("-DEXPECTED_VERSION=\"{s}\"", .{version});
     const static_lib = b.addLibrary(.{ .name = "md", .linkage = .static, .root_module = capi_mod });
     // The code calls helpers (such as __zig_probe_stack) that a C toolchain's
     // runtime does not have.
@@ -59,7 +65,7 @@ pub fn build(b: *std.Build) void {
         .name = "c-smoke",
         .root_module = b.createModule(.{ .target = target, .optimize = optimize, .link_libc = true }),
     });
-    smoke.root_module.addCSourceFile(.{ .file = b.path("test/c/smoke.c"), .flags = &.{ "-std=c11", "-Wall", "-Wextra" } });
+    smoke.root_module.addCSourceFile(.{ .file = b.path("test/c/smoke.c"), .flags = &.{ "-std=c11", "-Wall", "-Wextra", expected_version } });
     smoke.root_module.addIncludePath(b.path("include"));
     smoke.root_module.linkLibrary(static_lib);
     test_step.dependOn(&b.addRunArtifact(smoke).step);
@@ -68,7 +74,7 @@ pub fn build(b: *std.Build) void {
     // libraries, which is how a C user links them. Needs `cc`.
     const cc_step = b.step("test-cc", "Link the C smoke test with the system C compiler");
     for ([_]*std.Build.Step.Compile{ static_lib, shared_lib }) |library| {
-        const cc = b.addSystemCommand(&.{ "cc", "-std=c11", "-Wall", "-Wextra", "-Werror" });
+        const cc = b.addSystemCommand(&.{ "cc", "-std=c11", "-Wall", "-Wextra", "-Werror", expected_version });
         cc.addPrefixedDirectoryArg("-I", b.path("include"));
         cc.addFileArg(b.path("test/c/smoke.c"));
         cc.addArtifactArg(library);
