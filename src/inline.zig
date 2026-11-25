@@ -16,6 +16,18 @@ const Node = ast.Node;
 pub const Ref = struct { destination: []const u8, title: []const u8 };
 pub const RefMap = std.StringHashMapUnmanaged(Ref);
 
+/// Most characters inside the brackets of a link label (CommonMark 6.3).
+pub const max_label_chars = 999;
+
+/// Whether `inner`, the text between a label's brackets, is short enough.
+fn labelFits(inner: []const u8) bool {
+    if (inner.len <= max_label_chars) return true;
+    var chars: usize = 0;
+    // Every byte that does not continue a UTF-8 sequence starts a character.
+    for (inner) |c| chars += @intFromBool((c & 0xc0) != 0x80);
+    return chars <= max_label_chars;
+}
+
 /// Deepest parentheses accepted in a bare link destination. CommonMark lets an
 /// implementation limit them (to no less than three); cmark uses 32. Without a
 /// limit, repeated `[a](` takes quadratic time.
@@ -452,16 +464,14 @@ const Inl = struct {
         const s = self.subject;
         if (self.pos >= s.len or s[self.pos] != '[') return 0;
         var p = self.pos + 1;
-        var items: usize = 0;
-        while (p < s.len) {
+        // Stops early: no label can be longer than this many bytes.
+        while (p < s.len and p - self.pos <= 4 * max_label_chars + 1) {
             const c = s[p];
-            if (c == ']') return p + 1 - self.pos;
+            if (c == ']') return if (labelFits(s[self.pos + 1 .. p])) p + 1 - self.pos else 0;
             if (c == '[') return 0;
             if (c == '\\' and p + 1 < s.len) {
                 p += 2;
             } else p += 1;
-            items += 1;
-            if (items > 1000) return 0;
         }
         return 0;
     }
@@ -606,14 +616,14 @@ const Inl = struct {
             }
             if (n == 0) self.pos = save;
             if (n == 2) self.pos = before_label + 2; // "[]" is consumed
-            if (label) |l| {
+            if (label) |l| if (labelFits(l[1 .. l.len - 1])) {
                 const key = try text.normalizeLabel(self.a, l[1 .. l.len - 1]);
                 if (self.refs.get(key)) |ref| if (self.spendRef(ref)) {
                     dest = ref.destination;
                     title = ref.title;
                     matched = true;
                 };
-            }
+            };
             if (!matched) self.pos = if (n == 0) save else self.pos;
         }
 

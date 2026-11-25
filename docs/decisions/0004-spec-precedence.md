@@ -28,6 +28,7 @@ Every difference that is found is recorded in the table below.
 | Table rows shorter than the header | GFM: "empty cells are inserted" | md-zig padded without limit, so 24 KB of input used 2.9 GB | **Departs from the spec** past `Options.max_padded_cells` (default 524,288 for the document): the table ends there. cmark-gfm has a limit of the same size. |
 | Many uses of one reference definition | CommonMark sets no limit | output grew with definition length times uses | **Departs from the spec** past a budget equal to the input size, at least 100,000 bytes: further references stay text. This follows the rule in cmark. |
 | Nested parentheses in a bare link destination | CommonMark 6.3: implementations may limit them, supporting at least three levels | unlimited, with quadratic time | Limited to 32, as in cmark. Within the spec. |
+| Longest link label | CommonMark 6.3: "at most 999 characters inside the square brackets" | md-zig accepted 1000, as cmark 0.30.2 does | Follows the spec: 999 characters (not bytes). Differs from cmark. |
 
 ## Consequences
 

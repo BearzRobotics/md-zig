@@ -231,3 +231,35 @@ test "dangerous addresses are recognised in trees built by other readers" {
         try std.testing.expect(!md.html.isDangerousUrl(url));
     }
 }
+
+fn expectLabelLink(unit: []const u8, count: usize, extra: []const u8, shortcut: bool, linked: bool) !void {
+    const gpa = std.testing.allocator;
+    var label: std.ArrayList(u8) = .empty;
+    defer label.deinit(gpa);
+    for (0..count) |_| try label.appendSlice(gpa, unit);
+    try label.appendSlice(gpa, extra);
+    const use = if (shortcut) "" else "[x]";
+    const src = try std.fmt.allocPrint(gpa, "{s}[{s}]\n\n[{s}]: /u\n", .{ use, label.items, label.items });
+    defer gpa.free(src);
+    const out = try render(gpa, src);
+    defer gpa.free(out);
+    try std.testing.expectEqual(linked, std.mem.find(u8, out, "<a ") != null);
+}
+
+test "link labels hold at most 999 characters" {
+    for ([_]bool{ false, true }) |shortcut| {
+        try expectLabelLink("a", 999, "", shortcut, true);
+        try expectLabelLink("a", 1000, "", shortcut, false);
+        // Characters are counted, not bytes.
+        try expectLabelLink("\u{20ac}", 999, "", shortcut, true);
+        try expectLabelLink("\u{20ac}", 999, "a", shortcut, false);
+    }
+}
+
+test "a long run of spaces does not make an over-long shortcut label match" {
+    const gpa = std.testing.allocator;
+    const src = "[a" ++ @as([1000]u8, @splat(' ')) ++ "b]\n\n[a b]: /u\n";
+    const out = try render(gpa, src);
+    defer gpa.free(out);
+    try std.testing.expect(std.mem.find(u8, out, "<a ") == null);
+}
