@@ -142,3 +142,17 @@ fn expectSameHtml(srcs: []const []const u8, ext: md.Extensions) !void {
 test "emphasis next to letters outside ASCII" {
     try expectSameHtml(&.{ "*x*\u{e9}\n", "\u{e9}*x*\n", "\u{41f}\u{440}\u{438}*x*\n", "caf\u{e9}*s* and *n\u{e9}*e\n", "\u{65e5}**\u{672c}**\u{8a9e}\n" }, .{});
 }
+
+test "nested and adjacent emphasis keeps its meaning" {
+    try expectSameHtml(&.{
+        "*a*_-_\n",                "_#_*h*\n",   "***m*>*>*\n", "**%*~*-*\n",   "**>*o**)*\n",                         "*# *=***<*\n",
+        "*****!**.**\n",           "a*www.a*\n", "u*a@b.r*\n",  "b~~a@b.c~~\n", "| a*www.a* \\| |\n|-|\n| _#_*h* |\n", "# _#_*h*\n",
+        "*a*_-_[^1]\n\n[^1]: n\n",
+    }, md.Extensions.all);
+}
+
+test "ordinary emphasis keeps its usual spelling" {
+    const out = try written("*a* **b** ~~c~~ d*e*f\n", md.Extensions.all);
+    defer std.testing.allocator.free(out);
+    try std.testing.expectEqualStrings("_a_ **b** ~~c~~ d*e*f\n", out);
+}

@@ -15,6 +15,9 @@
 //! definitions are resolved and not written), tables are padded with single
 //! spaces. Text is backslash-escaped where it could be mistaken for markup.
 //!
+//! Where no Markdown spelling of some emphasis reads back correctly, it is
+//! written as `<em>`, `<strong>` or `<del>`.
+//!
 //! Nesting deeper than `max_depth` fails with `error.TooDeep` instead of
 //! exhausting the stack.
 
@@ -26,6 +29,8 @@ const Node = ast.Node;
 const Kind = ast.Kind;
 const Extensions = @import("options.zig").Extensions;
 const unicode = @import("unicode.zig");
+const inl = @import("inline.zig");
+const html = @import("html.zig");
 
 pub const Error = Io.Writer.Error || Allocator.Error || error{TooDeep};
 
@@ -46,6 +51,22 @@ const Gen = struct {
     ext: Extensions,
     depth: u32 = 0,
     in_cell: bool = false,
+    /// How emphasis is being spelled; see `leaf`.
+    spelling: Spelling = .usual,
+    /// Emphasis containers around the inline being written.
+    emphasis_depth: u32 = 0,
+
+    const Spelling = enum {
+        /// `_x_` (or `*x*` beside letters), `**x**`, `~~x~~`.
+        usual,
+        stars,
+        underscores,
+        /// `*` and `_` taking turns from one level of nesting to the next.
+        alternating,
+        /// Raw `<em>`, `<strong>` and `<del>`: renders the same where no
+        /// Markdown spelling does.
+        tags,
+    };
 
     fn enter(self: *Gen) Error!void {
         if (self.depth >= max_depth) return error.TooDeep;
@@ -83,16 +104,16 @@ const Gen = struct {
 
     fn block(self: *Gen, n: *Node, prev: ?*Node) Error![]const u8 {
         switch (n.kind) {
-            .paragraph => return self.line(try self.inlines(n, .paragraph)),
+            .paragraph => return self.line(try self.leaf(n, .paragraph)),
             .heading => {
                 var out: std.ArrayList(u8) = .empty;
                 try out.appendNTimes(self.a, '#', @max(@as(u8, 1), @min(n.level, 6)));
                 if (n.level <= 2 and hasBreak(n)) {
-                    const body = try self.inlines(n, .paragraph);
+                    const body = try self.leaf(n, .paragraph);
                     const under: []const u8 = if (n.level == 1) "===\n" else "---\n";
                     return std.mem.concat(self.a, u8, &.{ body, "\n", under });
                 }
-                const body = try self.inlines(n, .heading);
+                const body = try self.leaf(n, .heading);
                 if (body.len != 0) {
                     try out.append(self.a, ' ');
                     try out.appendSlice(self.a, body);
@@ -220,7 +241,7 @@ const Gen = struct {
                 !(prev.? == .deflist_term and c.kind == .deflist_def)) try out.append(self.a, '\n');
             switch (c.kind) {
                 .deflist_term => {
-                    try out.appendSlice(self.a, try self.inlines(c, .paragraph));
+                    try out.appendSlice(self.a, try self.leaf(c, .paragraph));
                     try out.append(self.a, '\n');
                 },
                 else => {
@@ -245,7 +266,7 @@ const Gen = struct {
             var cell = r.first_child;
             while (cell) |c| : (cell = c.next) {
                 try out.append(self.a, ' ');
-                try out.appendSlice(self.a, try self.inlines(c, .cell));
+                try out.appendSlice(self.a, try self.leaf(c, .cell));
                 try out.appendSlice(self.a, " |");
             }
             try out.append(self.a, '\n');
@@ -291,6 +312,74 @@ const Gen = struct {
     // ---- inlines -----------------------------------------------------------
 
     const Ctx = enum { paragraph, heading, cell };
+
+    /// The inline content of a paragraph, heading, term or cell. Whether a
+    /// delimiter opens or closes emphasis depends on everything around it, so
+    /// content with emphasis is read back, and spelled another way until it
+    /// renders as the original does.
+    fn leaf(self: *Gen, parent: *Node, ctx: Ctx) Error![]const u8 {
+        const first = try self.inlines(parent, ctx);
+        if (!hasEmphasis(parent)) return first;
+        var footnotes: html.Footnotes = .empty;
+        const want = try self.innerHtml(parent, &footnotes, true);
+        if (try self.readsAs(first, ctx, &footnotes, want)) return first;
+        defer self.spelling = .usual;
+        for ([_]Spelling{ .stars, .underscores, .alternating, .tags }) |spelling| {
+            self.spelling = spelling;
+            const again = try self.inlines(parent, ctx);
+            if (try self.readsAs(again, ctx, &footnotes, want)) return again;
+        }
+        return first;
+    }
+
+    fn hasEmphasis(n: *Node) bool {
+        var w = ast.Walker.init(n);
+        while (w.next()) |ev| switch (ev.node.kind) {
+            .emph, .strong, .strikethrough => return true,
+            else => {},
+        };
+        return false;
+    }
+
+    /// The HTML of what is inside `n`. With `define`, a stand-in definition is
+    /// made in `footnotes` for every footnote referred to.
+    fn innerHtml(self: *Gen, n: *Node, footnotes: *html.Footnotes, define: bool) Error![]const u8 {
+        if (define) {
+            var w = ast.Walker.init(n);
+            while (w.next()) |ev| {
+                if (ev.node.kind != .footnote_ref) continue;
+                const def = try self.a.create(Node);
+                def.* = .{ .kind = .footnote_def };
+                try footnotes.put(self.a, ev.node.literal, def);
+            }
+        }
+        var out: Io.Writer.Allocating = .init(self.a);
+        var child = n.first_child;
+        while (child) |c| : (child = c.next) {
+            html.write(self.gpa, c, footnotes, self.ext, .{}, &out.writer) catch |e| switch (e) {
+                error.WriteFailed => return error.OutOfMemory,
+                error.OutOfMemory => return error.OutOfMemory,
+            };
+        }
+        return out.written();
+    }
+
+    /// Whether `written`, parsed as inline content, renders to `want`.
+    fn readsAs(self: *Gen, written: []const u8, ctx: Ctx, footnotes: *html.Footnotes, want: []const u8) Error!bool {
+        var content = written;
+        if (ctx == .cell) {
+            // The table parser takes the escape from a pipe first.
+            const copy = try self.a.alloc(u8, written.len);
+            const removed = std.mem.replace(u8, written, "\\|", "|", copy);
+            content = copy[0 .. written.len - removed];
+        }
+        const node = try self.a.create(Node);
+        node.* = .{ .kind = .paragraph, .literal = content };
+        var refs: inl.RefMap = .empty;
+        var nodes: ast.NodeBudget = .{ .left = std.math.maxInt(usize) };
+        try inl.processTree(self.a, node, &refs, footnotes, self.ext, 0, &nodes);
+        return std.mem.eql(u8, want, try self.innerHtml(node, footnotes, false));
+    }
 
     fn inlines(self: *Gen, parent: *Node, ctx: Ctx) Error![]const u8 {
         try self.enter();
@@ -345,22 +434,7 @@ const Gen = struct {
             .text => try self.escape(&out, n.literal, n.next, bol),
             .code => try self.codeSpan(&out, n.literal),
             .html_inline => try out.appendSlice(self.a, n.literal),
-            .emph => {
-                const d: []const u8 = if (self.intraword(n)) "*" else "_";
-                try out.appendSlice(self.a, d);
-                try out.appendSlice(self.a, try self.inlines(n, ctx));
-                try out.appendSlice(self.a, d);
-            },
-            .strong => {
-                try out.appendSlice(self.a, "**");
-                try out.appendSlice(self.a, try self.inlines(n, ctx));
-                try out.appendSlice(self.a, "**");
-            },
-            .strikethrough => {
-                try out.appendSlice(self.a, "~~");
-                try out.appendSlice(self.a, try self.inlines(n, ctx));
-                try out.appendSlice(self.a, "~~");
-            },
+            .emph, .strong, .strikethrough => try self.emphasis(&out, n, ctx),
             .link, .image => {
                 if (n.kind == .image) try out.append(self.a, '!');
                 try out.append(self.a, '[');
@@ -387,6 +461,36 @@ const Gen = struct {
             else => {},
         }
         return out.items;
+    }
+
+    fn emphasis(self: *Gen, out: *std.ArrayList(u8), n: *Node, ctx: Ctx) Error!void {
+        const mark: []const u8 = switch (self.spelling) {
+            .usual => if (n.kind == .emph and !self.intraword(n)) "_" else "*",
+            .stars, .tags => "*",
+            .underscores => "_",
+            .alternating => if (self.emphasis_depth % 2 == 0) "*" else "_",
+        };
+        var open: []const u8 = mark;
+        var close: []const u8 = mark;
+        if (n.kind == .strong) {
+            open = try std.mem.concat(self.a, u8, &.{ mark, mark });
+            close = open;
+        } else if (n.kind == .strikethrough) {
+            open = "~~";
+            close = open;
+        }
+        if (self.spelling == .tags) {
+            open, close = switch (n.kind) {
+                .emph => .{ "<em>", "</em>" },
+                .strong => .{ "<strong>", "</strong>" },
+                else => .{ "<del>", "</del>" },
+            };
+        }
+        self.emphasis_depth += 1;
+        defer self.emphasis_depth -= 1;
+        try out.appendSlice(self.a, open);
+        try out.appendSlice(self.a, try self.inlines(n, ctx));
+        try out.appendSlice(self.a, close);
     }
 
     /// A letter, as the emphasis rules see it (the test `inline.zig` makes).
