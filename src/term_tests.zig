@@ -282,3 +282,30 @@ test "deeply nested inlines are flattened, not a stack overflow" {
     try testing.expectEqual(@as(usize, max_depth * 2 * 2 + 2), out.len);
     try testing.expect(std.mem.find(u8, out, "a") != null);
 }
+
+/// Every line of a drawn table is as wide as its frame.
+fn expectFrame(out: []const u8, max_width: ?usize) !void {
+    var lines = std.mem.splitScalar(u8, std.mem.trimEnd(u8, out, "\n"), '\n');
+    const frame = lines.peek().?.len;
+    if (max_width) |m| try testing.expect(frame <= m);
+    while (lines.next()) |l| try testing.expectEqual(frame, l.len);
+}
+
+test "words too long for their column are split and the frame stays whole" {
+    const gpa = testing.allocator;
+    const url = "https://example.com/" ++ @as([100]u8, @splat('a'));
+    const out = try text(gpa, "| key | url |\n|-|-|\n| a | " ++ url ++ " |\n| b | x `y`" ++ url ++ ") z |\n", md.Extensions.gfm, .{ .width = 60, .unicode = false });
+    defer gpa.free(out);
+    try expectFrame(out, 60);
+    // Nothing is lost: each URL has 100 `a`s and one in "example", and one key is `a`.
+    var a: usize = 0;
+    for (out) |c| a += @intFromBool(c == 'a');
+    try testing.expectEqual(@as(usize, 2 * 101 + 1), a);
+}
+
+test "a table with too many columns for the width still has a whole frame" {
+    const gpa = testing.allocator;
+    const out = try text(gpa, "|abcdefgh|abcdefgh|abcdefgh|abcdefgh|abcdefgh|abcdefgh|abcdefgh|abcdefgh|abcdefgh|abcdefgh|abcdefgh|abcdefgh|\n|-|-|-|-|-|-|-|-|-|-|-|-|\n", md.Extensions.gfm, .{ .width = 60, .unicode = false });
+    defer gpa.free(out);
+    try expectFrame(out, null);
+}

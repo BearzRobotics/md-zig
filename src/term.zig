@@ -89,6 +89,9 @@ const Renderer = struct {
     used_index: std.StringHashMapUnmanaged(usize) = .empty,
     /// Narrowest width paragraphs are wrapped to (table cells go lower).
     min_width: usize = 20,
+    /// Break a word that is wider than the line, as table cells must: their
+    /// borders line up only if no line is wider than the column.
+    split_words: bool = false,
 
     // ---- low level -------------------------------------------------------------------
 
@@ -389,9 +392,11 @@ const Renderer = struct {
                 glued = false;
                 col = 0;
             },
-            .word => |word| {
-                const ww = unicode.stringWidth(word);
-                if (!glued and line_open and col + 1 + gluedWidth(tokens, idx) > avail) {
+            .word => |whole| {
+                var word = whole;
+                var ww = unicode.stringWidth(word);
+                const too_wide = self.split_words and line_open and col + @intFromBool(space) + ww > avail;
+                if (too_wide or (!glued and line_open and col + 1 + gluedWidth(tokens, idx) > avail)) {
                     const extra = if (self.o.justify and self.o.width != 0 and avail > col) avail - col else 0;
                     try self.emitLine(line.items, start, extra, from_right);
                     from_right = !from_right;
@@ -399,6 +404,13 @@ const Renderer = struct {
                     line_open = false;
                     space = false;
                     col = 0;
+                }
+                while (self.split_words and !line_open and ww > avail) {
+                    const cut = fitting(word, avail);
+                    if (cut == word.len) break;
+                    try self.emitLine(&.{.{ .word = word[0..cut] }}, self.style, 0, false);
+                    word = word[cut..];
+                    ww = unicode.stringWidth(word);
                 }
                 if (!line_open) {
                     start = self.style;
@@ -415,6 +427,20 @@ const Renderer = struct {
             },
         };
         if (line_open) try self.emitLine(line.items, start, 0, false);
+    }
+
+    /// How many bytes of `word` fit in `width` columns; at least one
+    /// character, so that splitting always advances.
+    fn fitting(word: []const u8, width: usize) usize {
+        var i: usize = 0;
+        var used: usize = 0;
+        while (i < word.len) {
+            const d = unicode.decodeAt(word, i);
+            used += unicode.displayWidth(d.cp);
+            if (used > width and i != 0) break;
+            i += d.len;
+        }
+        return i;
     }
 
     /// Width of the run of words that starts at `tokens[from]` and is not
@@ -653,6 +679,7 @@ const Renderer = struct {
             .o = self.o,
             .defs = self.defs,
             .min_width = 4,
+            .split_words = width != 0,
             .used = self.used,
             .used_index = self.used_index,
         };
