@@ -95,10 +95,6 @@ if (md_parse(src, len, MD_EXT_ALL, &doc) == MD_OK) {
 - The Markdown writer does not keep how a construct was spelled (setext vs ATX, `*` vs `_`, reference-style links, indented code, wrapping).
 
 - A blank line between a term and its `: definition` (the `:` line must follow the term directly).
-- Unicode: "punctuation" and "whitespace" for emphasis, and case folding of link
-  labels, are approximated by ranges (no Unicode database in the standard
-  library). Text outside those ranges is treated as letters. See
-  `docs/decisions/0001-architecture.md`.
 - The terminal renderer does not draw raw HTML (blocks are shown dimmed, inline
   HTML is dropped) and cuts off containers nested more than 64 deep.
 
@@ -108,9 +104,9 @@ if (md_parse(src, len, MD_EXT_ALL, &doc) == MD_OK) {
 https://spec.commonmark.org/0.31.2/spec.json and
 https://github.com/github/cmark-gfm), the `std.Io` boundary tests (one-byte
 buffers, readers and writers that fail part-way, size limits, leaks), and the
-renderer tests. `scripts/gen-entities.py`, `scripts/gen-widths.py` and
-`scripts/extract-gfm-examples.py` regenerate `src/entities.zig`,
-`src/widths.zig` and the GFM fixture.
+renderer tests. `scripts/gen-entities.py`, `scripts/gen-unicode.py`, `scripts/gen-widths.py`
+and `scripts/extract-gfm-examples.py` regenerate `src/entities.zig`,
+`src/unicode_tables.zig`, `src/widths.zig` and the GFM fixture.
 
 ## Layout
 

@@ -14,6 +14,7 @@
 | `scan.zig` | Hand-written matchers for the spec's regular expressions (raw HTML, autolinks) |
 | `text.zig` | Escapes, character references, URL encoding, link label normalisation |
 | `unicode.zig` | Punctuation/whitespace classes, UTF-8 helpers, display width |
+| `unicode_tables.zig` | Generated punctuation, space and case folding tables (`scripts/gen-unicode.py`) |
 | `widths.zig` | Generated table of the wide and fullwidth code points (`scripts/gen-widths.py`) |
 | `entities.zig` | Generated table of the 2125 named character references |
 | `html.zig` | HTML renderer (also footnote section, tag filter) |

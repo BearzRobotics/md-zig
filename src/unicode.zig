@@ -1,46 +1,61 @@
-//! The Unicode classes CommonMark's emphasis rules need, and UTF-8 helpers.
-//!
-//! There is no Unicode database in the standard library, so "Unicode
-//! punctuation" (general categories P and S) and "Unicode whitespace" (Zs, tab,
-//! line feed, form feed, carriage return) are approximated by ASCII plus the
-//! ranges of the common blocks. Characters outside those ranges are treated as
-//! ordinary letters. This is a documented deviation (docs/decisions/0001).
+//! The Unicode classes CommonMark's emphasis rules need, case folding for link
+//! labels, and UTF-8 helpers. The classes and folds are those of CommonMark
+//! 0.31.2, from tables generated out of the Unicode Character Database
+//! (`unicode_tables.zig`).
 
 const std = @import("std");
 const widths = @import("widths.zig");
+const tables = @import("unicode_tables.zig");
 
 pub fn isAsciiPunct(c: u8) bool {
     return (c >= 0x21 and c <= 0x2f) or (c >= 0x3a and c <= 0x40) or (c >= 0x5b and c <= 0x60) or (c >= 0x7b and c <= 0x7e);
 }
 
+/// "Unicode whitespace": category Zs, tab, line feed, form feed and carriage
+/// return. (Line tabulation is not one of them.)
 pub fn isUnicodeWhitespace(cp: u21) bool {
     return switch (cp) {
-        ' ', '\t', '\n', '\r', 0x0c, 0x0b, 0xa0, 0x1680, 0x202f, 0x205f, 0x3000 => true,
-        0x2000...0x200a => true,
-        else => false,
+        ' ', '\t', '\n', 0x0c, '\r' => true,
+        else => cp >= 0x80 and inRuns(&tables.space_separators, cp),
     };
 }
 
+/// "Unicode punctuation": general categories P and S.
 pub fn isUnicodePunct(cp: u21) bool {
     if (cp < 0x80) return isAsciiPunct(@intCast(cp));
-    return switch (cp) {
-        // Latin-1 punctuation and symbols.
-        0xa1...0xa9, 0xab...0xb1, 0xb4, 0xb6...0xb8, 0xbb, 0xbf, 0xd7, 0xf7 => true,
-        // Spacing modifier symbols, Greek/Cyrillic punctuation.
-        0x2c2...0x2c5, 0x2d2...0x2df, 0x2e5...0x2eb, 0x2ed, 0x2ef...0x2ff, 0x37e, 0x387 => true,
-        // General Punctuation, super/subscripts, currency, letterlike, arrows,
-        // math operators, technical, shapes, dingbats, supplemental punctuation.
-        0x2010...0x2027, 0x2030...0x205e => true,
-        0x2070...0x209f => false,
-        0x20a0...0x20cf => true,
-        0x2100...0x214f => false,
-        0x2190...0x2bff => true,
-        0x2e00...0x2e7f => true,
-        // CJK symbols and punctuation, fullwidth forms.
-        0x3001...0x3003, 0x3008...0x3020, 0x3030, 0x30fb => true,
-        0xff01...0xff0f, 0xff1a...0xff20, 0xff3b...0xff40, 0xff5b...0xff65 => true,
-        else => false,
-    };
+    return inRuns(&tables.punctuation, cp);
+}
+
+/// Whether `cp` lies in one of the ordered, separate runs of `runs`.
+fn inRuns(runs: []const [2]u21, cp: u21) bool {
+    var lo: usize = 0;
+    var hi: usize = runs.len;
+    while (lo < hi) {
+        const mid = lo + (hi - lo) / 2;
+        if (cp < runs[mid][0]) {
+            hi = mid;
+        } else if (cp > runs[mid][1]) {
+            lo = mid + 1;
+        } else return true;
+    }
+    return false;
+}
+
+/// What the non-ASCII `cp` folds to (UTF-8, up to three code points), or null
+/// when it folds to itself.
+pub fn caseFold(cp: u21) ?[]const u8 {
+    var lo: usize = 0;
+    var hi: usize = tables.case_folds.len;
+    while (lo < hi) {
+        const mid = lo + (hi - lo) / 2;
+        const f = tables.case_folds[mid];
+        if (cp < f.from) {
+            hi = mid;
+        } else if (cp > f.from) {
+            lo = mid + 1;
+        } else return f.to;
+    }
+    return null;
 }
 
 /// Decodes the code point that starts at `s[i]`. Invalid bytes decode as U+FFFD
@@ -71,18 +86,7 @@ pub fn displayWidth(cp: u21) usize {
         0x0300...0x036f, 0x200b...0x200f, 0x2060...0x2064, 0xfe00...0xfe0f, 0x20d0...0x20ff => return 0,
         else => {},
     }
-    var lo: usize = 0;
-    var hi: usize = widths.wide.len;
-    while (lo < hi) {
-        const mid = lo + (hi - lo) / 2;
-        const run = widths.wide[mid];
-        if (cp < run[0]) {
-            hi = mid;
-        } else if (cp > run[1]) {
-            lo = mid + 1;
-        } else return 2;
-    }
-    return 1;
+    return if (inRuns(&widths.wide, cp)) 2 else 1;
 }
 
 /// The columns a UTF-8 string takes in a terminal.
@@ -106,4 +110,11 @@ test "display widths follow East Asian Width" {
     }
     try std.testing.expectEqual(@as(usize, 0), displayWidth(0x301));
     for (widths.wide[1..], widths.wide[0 .. widths.wide.len - 1]) |run, before| try std.testing.expect(run[0] > before[1] + 1);
+}
+
+test "punctuation and white space are the CommonMark classes" {
+    for ([_]u21{ '!', 0xa1, 0xb6, 0x20ac, 0x2014, 0x2116, 0x1f600, 0x10100 }) |cp| try std.testing.expect(isUnicodePunct(cp));
+    for ([_]u21{ 'a', 0xe9, 0xaa, 0x2070, 0x4e00 }) |cp| try std.testing.expect(!isUnicodePunct(cp));
+    for ([_]u21{ ' ', '\t', '\n', 0x0c, '\r', 0xa0, 0x2000, 0x3000 }) |cp| try std.testing.expect(isUnicodeWhitespace(cp));
+    for ([_]u21{ 0x0b, 0x200b, 0x2028, 0x85, 'a' }) |cp| try std.testing.expect(!isUnicodeWhitespace(cp));
 }

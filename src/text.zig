@@ -121,7 +121,7 @@ pub fn encodeUrl(a: Allocator, s: []const u8) Allocator.Error![]const u8 {
 
 /// The key under which a link reference is stored: the label without its
 /// brackets, outer whitespace trimmed, inner whitespace runs collapsed to one
-/// space, and case folded (ASCII, Latin-1, Greek, Cyrillic and sharp s).
+/// space, and case folded (the Unicode case fold, as CommonMark requires).
 pub fn normalizeLabel(a: Allocator, label: []const u8) Allocator.Error![]const u8 {
     var out: std.ArrayList(u8) = .empty;
     const inner = std.mem.trim(u8, label, " \t\r\n\x0b\x0c");
@@ -144,24 +144,11 @@ pub fn normalizeLabel(a: Allocator, label: []const u8) Allocator.Error![]const u
             continue;
         }
         const d = unicode.decodeAt(inner, i);
+        const original = inner[i .. i + d.len];
         i += d.len;
-        const folded: u21 = switch (d.cp) {
-            0xdf, 0x1e9e => {
-                try out.appendSlice(a, "ss");
-                continue;
-            },
-            0xc0...0xd6, 0xd8...0xde => d.cp + 0x20,
-            0x391...0x3a1, 0x3a3...0x3a9 => d.cp + 0x20,
-            0x410...0x42f => d.cp + 0x20,
-            0x400...0x40f => d.cp + 0x50,
-            else => d.cp,
-        };
-        var buf: [4]u8 = undefined;
-        const n = std.unicode.utf8Encode(folded, &buf) catch {
-            try out.appendSlice(a, inner[i - d.len .. i]);
-            continue;
-        };
-        try out.appendSlice(a, buf[0..n]);
+        // Bytes that are not UTF-8 decode as one byte each and stay as they are.
+        const folded = if (d.len == 1) null else unicode.caseFold(d.cp);
+        try out.appendSlice(a, folded orelse original);
     }
     return out.items;
 }
@@ -184,6 +171,9 @@ test "labels fold case and whitespace" {
     const a = arena.allocator();
     try std.testing.expectEqualStrings("foo bar", try normalizeLabel(a, "  Foo \n BAR "));
     try std.testing.expectEqualStrings("ss", try normalizeLabel(a, "\u{1e9e}"));
+    // Latin Extended, Greek, Armenian, and folds to several characters.
+    try std.testing.expectEqualStrings("\u{101} \u{3b1}\u{3c9} \u{561} fi", try normalizeLabel(a, "\u{100} \u{391}\u{3a9} \u{531} \u{fb01}"));
+    try std.testing.expectEqualStrings("\xff\xfe", try normalizeLabel(a, "\xff\xfe"));
 }
 
 test "urls are encoded like mdurl" {
