@@ -155,6 +155,31 @@ const Renderer = struct {
         }
     }
 
+    /// `s` made safe to send to a terminal: control characters other than tab
+    /// (C0, DEL, C1) and bytes that are not UTF-8 become U+FFFD, so a document
+    /// cannot send escape sequences. Every string taken from the tree passes
+    /// through here. The result is `s` itself when nothing had to change.
+    fn clean(self: *Renderer, s: []const u8) Allocator.Error![]const u8 {
+        var out: std.ArrayList(u8) = .empty;
+        var done: usize = 0;
+        var i: usize = 0;
+        while (i < s.len) {
+            const d = unicode.decodeAt(s, i);
+            // An invalid byte decodes as U+FFFD of length 1.
+            const invalid = d.len == 1 and s[i] >= 0x80;
+            const control = (d.cp < 0x20 and d.cp != '\t') or (d.cp >= 0x7f and d.cp <= 0x9f);
+            if (invalid or control) {
+                try out.appendSlice(self.a, s[done..i]);
+                try out.appendSlice(self.a, "\u{fffd}");
+                done = i + d.len;
+            }
+            i += d.len;
+        }
+        if (done == 0 and out.items.len == 0) return s;
+        try out.appendSlice(self.a, s[done..]);
+        return out.items;
+    }
+
     fn addText(self: *Renderer, tokens: *std.ArrayList(Token), s: []const u8) Allocator.Error!void {
         var i: usize = 0;
         while (i < s.len) {
@@ -164,7 +189,7 @@ const Renderer = struct {
             } else {
                 const start = i;
                 while (i < s.len and !text.isWhitespace(s[i])) i += 1;
-                try tokens.append(self.a, .{ .word = s[start..i] });
+                try tokens.append(self.a, .{ .word = try self.clean(s[start..i]) });
             }
         }
     }
@@ -252,7 +277,7 @@ const Renderer = struct {
                     if (!same) {
                         try tokens.append(self.a, .space);
                         try self.pushStyle(tokens, .dim, true, "");
-                        try tokens.append(self.a, .{ .word = try std.fmt.allocPrint(self.a, "<{s}>", .{dest}) });
+                        try tokens.append(self.a, .{ .word = try std.fmt.allocPrint(self.a, "<{s}>", .{try self.clean(dest)}) });
                         try self.pushStyle(tokens, .dim, false, "");
                     }
                 }
@@ -458,7 +483,7 @@ const Renderer = struct {
                     if (n.indent == 0) {
                         try self.w.writeAll("    ");
                     } else if (n.indent != Node.flush) try self.w.splatByteAll(' ', n.indent);
-                    try self.w.writeAll(line);
+                    try self.w.writeAll(try self.clean(line));
                     if (self.o.color) try self.w.writeAll("\x1b[0m");
                     try self.w.writeAll("\n");
                 }
@@ -470,7 +495,7 @@ const Renderer = struct {
                 while (lines.next()) |line| {
                     try self.writePrefix(false);
                     if (self.o.color) try self.w.writeAll("\x1b[2m");
-                    try self.w.writeAll(line);
+                    try self.w.writeAll(try self.clean(line));
                     if (self.o.color) try self.w.writeAll("\x1b[0m");
                     try self.w.writeAll("\n");
                 }

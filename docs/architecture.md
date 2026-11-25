@@ -16,7 +16,7 @@
 | `unicode.zig` | Punctuation/whitespace classes, UTF-8 helpers, display width |
 | `entities.zig` | Generated table of the 2125 named character references |
 | `html.zig` | HTML renderer (also footnote section, tag filter) |
-| `term.zig` | Terminal renderer (wrapping, lists, tables, ANSI); `TextOptions.justify` pads wrapped lines to the margin, alternating which end gets the extra space; `tight_headings` drops the blank line under a level 2+ heading, as man pages have it |
+| `term.zig` | Terminal renderer (wrapping, lists, tables, ANSI); control characters from the document are replaced with U+FFFD, so only the renderer's own escape sequences are written; `TextOptions.justify` pads wrapped lines to the margin, alternating which end gets the extra space; `tight_headings` drops the blank line under a level 2+ heading, as man pages have it |
 
 ## The tree as an interface
 

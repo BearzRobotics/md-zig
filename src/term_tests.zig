@@ -230,3 +230,38 @@ test "tight headings put the text directly under a section heading" {
     defer gpa.free(normal);
     try testing.expectEqualStrings("# Title\n\n## NAME\n\ntext\n\n## MORE\n\nother\n", normal);
 }
+
+test "control characters from the document never reach the terminal" {
+    const gpa = testing.allocator;
+    // Raw bytes, character references, C1, invalid UTF-8, code, HTML, tables,
+    // image text and definition terms.
+    const src = "a \x1b]52;c;eA==\x07 &#x1b;[2J &#27;&#7;&#x9b;&#127; \x9b b\n\n" ++
+        "`\x1b[1m` ![\x1b](u)\n\n```\n\x1b[2J\r\n```\n\n<div>\x1b[3J</div>\n\n" ++
+        "| \x1b |\n| - |\n| \x07 |\n\nT\x1b\n: d\x08\n";
+    const out = try text(gpa, src, md.Extensions.all, .{ .unicode = false });
+    defer gpa.free(out);
+    for (out) |c| try testing.expect((c >= 0x20 and c != 0x7f) or c == '\n' or c == '\t');
+    try testing.expect(std.unicode.utf8ValidateSlice(out));
+    var i: usize = 0;
+    while (i + 1 < out.len) : (i += 1) try testing.expect(!(out[i] == 0xc2 and out[i + 1] < 0xa0));
+    try testing.expect(std.mem.find(u8, out, "\u{fffd}[2J") != null);
+}
+
+test "a link destination built into the tree is cleaned too" {
+    const gpa = testing.allocator;
+    var doc = try md.Document.parse(gpa, "[x](u)\n", .{});
+    defer doc.deinit();
+    doc.root.first_child.?.first_child.?.literal = "\x1b[2J";
+    const out = try doc.toTextAlloc(gpa, .{});
+    defer gpa.free(out);
+    try testing.expectEqualStrings("x <\u{fffd}[2J>\n", out);
+}
+
+test "colour output holds only the renderer's own escape sequences" {
+    const gpa = testing.allocator;
+    const out = try text(gpa, "**&#27;]0;t&#7;** `&#27;`\n", .{}, .{ .color = true });
+    defer gpa.free(out);
+    var i: usize = 0;
+    while (std.mem.findScalarPos(u8, out, i, 0x1b)) |at| : (i = at + 1) try testing.expectEqual(@as(u8, '['), out[at + 1]);
+    try testing.expect(std.mem.findScalar(u8, out, 0x07) == null);
+}
