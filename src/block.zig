@@ -24,6 +24,8 @@ pub const Parser = struct {
     last_matched: *Node,
     refs: inl.RefMap = .empty,
     ext: opts.Extensions,
+    /// Bytes of input seen, which sets the reference expansion budget.
+    input_bytes: usize = 0,
     /// Empty cells that short table rows will be padded with, so far.
     padded_cells: usize = 0,
     max_padded_cells: usize = (opts.Options{}).max_padded_cells,
@@ -968,6 +970,7 @@ pub const Parser = struct {
     // ---- one line --------------------------------------------------------------------
 
     pub fn feed(self: *Parser, ln: []const u8) Allocator.Error!void {
+        self.input_bytes +|= ln.len + 1;
         if (self.ext.front_matter and self.fm_state != .done) {
             if (try self.frontMatterLine(ln)) return;
         }
@@ -1075,7 +1078,10 @@ pub const Parser = struct {
             if (n.build.open) try self.finalize(n);
             t = parent;
         }
-        try inl.processTree(self.a, self.doc, &self.refs, &self.footnotes, self.ext);
+        // As in cmark: references may add as many bytes as the input has,
+        // and always at least `inl.min_ref_expansion`.
+        const budget = @max(self.input_bytes, inl.min_ref_expansion);
+        try inl.processTree(self.a, self.doc, &self.refs, &self.footnotes, self.ext, budget);
     }
 };
 

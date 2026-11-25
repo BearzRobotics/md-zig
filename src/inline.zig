@@ -16,6 +16,11 @@ const Node = ast.Node;
 pub const Ref = struct { destination: []const u8, title: []const u8 };
 pub const RefMap = std.StringHashMapUnmanaged(Ref);
 
+/// Every use of a reference repeats its destination and title in the output,
+/// so their total is limited (otherwise output grows with the product of the
+/// definition's length and the number of uses). This is the smallest limit.
+pub const min_ref_expansion = 100_000;
+
 const Delim = struct {
     cc: u8,
     num: usize,
@@ -40,6 +45,8 @@ const Bracket = struct {
 const Inl = struct {
     a: Allocator,
     refs: *const RefMap,
+    /// Bytes that references may still add. Past it they stay text.
+    ref_budget: ?*usize = null,
     ext: opts.Extensions = .{},
     footnotes: ?*const std.StringHashMapUnmanaged(*Node) = null,
     subject: []const u8,
@@ -518,6 +525,14 @@ const Inl = struct {
         return null;
     }
 
+    fn spendRef(self: *Inl, ref: Ref) bool {
+        const left = self.ref_budget orelse return true;
+        const cost = ref.destination.len + ref.title.len;
+        if (cost > left.*) return false;
+        left.* -= cost;
+        return true;
+    }
+
     fn parseCloseBracket(self: *Inl, block: *Node) Allocator.Error!bool {
         self.pos += 1;
         const start = self.pos;
@@ -583,11 +598,11 @@ const Inl = struct {
             if (n == 2) self.pos = before_label + 2; // "[]" is consumed
             if (label) |l| {
                 const key = try text.normalizeLabel(self.a, l[1 .. l.len - 1]);
-                if (self.refs.get(key)) |ref| {
+                if (self.refs.get(key)) |ref| if (self.spendRef(ref)) {
                     dest = ref.destination;
                     title = ref.title;
                     matched = true;
-                }
+                };
             }
             if (!matched) self.pos = if (n == 0) save else self.pos;
         }
@@ -686,7 +701,9 @@ pub fn processTree(
     refs: *const RefMap,
     footnotes: *const std.StringHashMapUnmanaged(*Node),
     ext: opts.Extensions,
+    ref_budget: usize,
 ) Allocator.Error!void {
+    var budget = ref_budget;
     var walker = ast.Walker.init(root);
     while (walker.next()) |ev| {
         if (!ev.entering) continue;
@@ -696,6 +713,7 @@ pub fn processTree(
                 var p: Inl = .{
                     .a = a,
                     .refs = refs,
+                    .ref_budget = &budget,
                     .ext = ext,
                     .footnotes = footnotes,
                     .subject = std.mem.trim(u8, node.literal, " \t\n\r\x0b\x0c"),

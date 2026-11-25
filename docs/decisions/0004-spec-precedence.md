@@ -26,6 +26,7 @@ Every difference that is found is recorded in the table below.
 | Subject | Specification | Differed | Outcome |
 |---|---|---|---|
 | Table rows shorter than the header | GFM: "empty cells are inserted" | md-zig padded without limit, so 24 KB of input used 2.9 GB | **Departs from the spec** past `Options.max_padded_cells` (default 524,288 for the document): the table ends there. cmark-gfm has a limit of the same size. |
+| Many uses of one reference definition | CommonMark sets no limit | output grew with definition length times uses | **Departs from the spec** past a budget equal to the input size, at least 100,000 bytes: further references stay text. This follows the rule in cmark. |
 
 ## Consequences
 

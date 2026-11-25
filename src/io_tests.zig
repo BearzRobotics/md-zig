@@ -252,3 +252,28 @@ test "a wide table with many short rows stays within the default budget" {
     defer doc.deinit();
     try testing.expect(countKind(doc.root, .table_cell) <= (md.Options{}).max_padded_cells + 2 * n + (512 * 1024 / n + 1));
 }
+
+test "reference expansion is limited" {
+    const gpa = testing.allocator;
+    var src: std.ArrayList(u8) = .empty;
+    defer src.deinit(gpa);
+    try src.appendSlice(gpa, "[a]: /");
+    try src.appendNTimes(gpa, 'u', 40_000);
+    try src.appendSlice(gpa, "\n\n");
+    for (0..2000) |_| try src.appendSlice(gpa, "[a] ");
+    var doc = try md.Document.parse(gpa, src.items, .{});
+    defer doc.deinit();
+    // Budget: 100,000 bytes, so two uses of a 40,001 byte destination.
+    try testing.expectEqual(@as(usize, 2), countKind(doc.root, .link));
+}
+
+test "ordinary use of references stays within the budget" {
+    const gpa = testing.allocator;
+    var src: std.ArrayList(u8) = .empty;
+    defer src.deinit(gpa);
+    try src.appendSlice(gpa, "[a]: https://example.com/a/page \"Title\"\n\n");
+    for (0..2000) |_| try src.appendSlice(gpa, "[a] ");
+    var doc = try md.Document.parse(gpa, src.items, .{});
+    defer doc.deinit();
+    try testing.expectEqual(@as(usize, 2000), countKind(doc.root, .link));
+}
