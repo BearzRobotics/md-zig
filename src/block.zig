@@ -233,8 +233,16 @@ pub const Parser = struct {
                 }
             },
             .html_block => {
-                const content: []const u8 = block.build.content.items;
-                block.literal = content[0..trailingBlankStart(content)];
+                var content: []const u8 = block.build.content.items;
+                // Kinds 1 to 5 end only at their closer, so blank lines before
+                // the end of the input belong to them. For the others, and the
+                // last line ending, trailing blank lines are not kept.
+                if (block.build.html_type >= 6) {
+                    content = content[0..trailingBlankStart(content)];
+                } else if (std.mem.endsWith(u8, content, "\n") and !std.mem.endsWith(u8, content, "\n\n")) {
+                    content = content[0 .. content.len - 1];
+                }
+                block.literal = content;
             },
             .list => {
                 var item = block.first_child;
@@ -524,7 +532,7 @@ pub const Parser = struct {
         return 7;
     }
 
-    fn htmlBlockEnds(kind: u8, s: []const u8) bool {
+    pub fn htmlBlockEnds(kind: u8, s: []const u8) bool {
         return switch (kind) {
             1 => blk: {
                 inline for (.{ "</script>", "</pre>", "</textarea>", "</style>" }) |t| {

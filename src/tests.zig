@@ -409,3 +409,16 @@ test "a task box that is a definition list's only term stays the term" {
     defer gpa.free(out);
     try std.testing.expectEqualStrings("<ul>\n<li>\n<dl>\n<dt>[ ]</dt>\n<dd>d</dd>\n</dl>\n</li>\n</ul>\n", out);
 }
+
+test "an HTML block without its closer keeps the blank lines that end the input" {
+    const gpa = std.testing.allocator;
+    // As cmark does: CommonMark ends kinds 1 to 5 only at their closer.
+    for ([_][2][]const u8{
+        .{ "<?\n\n", "<?\n\n" },               .{ "<pre>x\n\n\n", "<pre>x\n\n\n" }, .{ "<pre>x\n", "<pre>x\n" },
+        .{ "<!-- a -->\n\n", "<!-- a -->\n" }, .{ "<div>\n\n", "<div>\n" },
+    }) |case| {
+        const out = try render(gpa, case[0]);
+        defer gpa.free(out);
+        try std.testing.expectEqualStrings(case[1], out);
+    }
+}

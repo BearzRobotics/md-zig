@@ -92,7 +92,7 @@ const Gen = struct {
         var child = parent.first_child;
         var prev: ?*Node = null;
         while (child) |c| : (child = c.next) {
-            if (prev != null and !tight) try out.append(result, '\n');
+            if (prev != null and !tight and !endsOpen(prev.?)) try out.append(result, '\n');
             _ = scratch.reset(.retain_capacity);
             self.a = scratch.allocator();
             defer self.a = result;
@@ -102,6 +102,17 @@ const Gen = struct {
             prev = c;
         }
         return out.items;
+    }
+
+    /// Whether `n` ends in an HTML block that still waits for its closer. A
+    /// blank line written after it would become part of it; the blank lines it
+    /// has are already in its text.
+    fn endsOpen(n: *Node) bool {
+        var last = n;
+        while (last.kind != .html_block) last = last.last_child orelse return false;
+        const t = std.mem.trimStart(u8, last.literal, " ");
+        const kind = block_parser.htmlBlockKind(t);
+        return kind >= 1 and kind <= 5 and !block_parser.htmlBlockEnds(kind, last.literal);
     }
 
     fn block(self: *Gen, n: *Node, prev: ?*Node) Error![]const u8 {
@@ -253,7 +264,7 @@ const Gen = struct {
         var item = n.first_child;
         var first = true;
         while (item) |it| : (item = it.next) {
-            if (!first and !ld.tight) try out.append(self.a, '\n');
+            if (!first and !ld.tight and !endsOpen(it.prev.?)) try out.append(self.a, '\n');
             first = false;
             var marker: []const u8 = if (ld.kind == .bullet)
                 try std.fmt.allocPrint(self.a, "{c} ", .{bullet})

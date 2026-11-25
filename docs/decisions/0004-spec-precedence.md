@@ -36,6 +36,7 @@ Every difference that is found is recorded in the table below.
 | Wide characters in the terminal | Unicode East Asian Width (UAX #11), version 16.0.0: W and F are two columns | hand-written ranges missed many emoji and widened some narrow characters | Follows the Unicode data: some pictographs it calls narrow now count as one column. |
 | A footnote reference inside link text | footnotes are in neither Markdown spec; CommonMark forbids links inside links | md-zig treated the reference as a link, so the outer link became text | Follows cmark-gfm: the outer link stands. Note that its HTML puts an `a` element inside another, which HTML does not allow. |
 | Unicode punctuation, white space and link label case folding | CommonMark 0.31.2: categories P and S; category Zs with tab, LF, FF, CR; the Unicode case fold | approximated by ranges (a deviation listed in 0001); line tabulation counted as white space | Follows the spec, with tables from the Unicode Character Database 16.0.0. |
+| Blank lines in an HTML block that is never closed | CommonMark 4.6: kinds 1 to 5 end only at their end condition or the end of the document | blank lines at the end were dropped | Follows the spec, as cmark does. |
 
 ## Consequences
 

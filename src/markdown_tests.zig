@@ -279,3 +279,10 @@ test "a task box before a term; emphasis around a tag that spans lines" {
 test "an empty list right under a bare task box" {
     try expectSameHtml(&.{"+ [ ] [1]:>\n  1. [r]:#\n"}, md.Extensions.all);
 }
+
+test "nothing is added to an HTML block that was never closed" {
+    try expectSameHtml(&.{
+        "0. 0. <!--[ ] (\n<br/></div>\n\n%---#a\n", "- <?\n\nb\n", "> <pre>\n\nb\n",        "- <!--\n\n- b\n",
+        "- <?\n- b\n\n- c\n",                       "<?\n\n",      "> <![CDATA[\n>\n\na\n",
+    }, .{});
+}
