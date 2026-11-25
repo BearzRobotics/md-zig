@@ -263,3 +263,21 @@ test "a long run of spaces does not make an over-long shortcut label match" {
     defer gpa.free(out);
     try std.testing.expect(std.mem.find(u8, out, "<a ") == null);
 }
+
+test "tabs are accepted around link destinations and titles" {
+    const gpa = std.testing.allocator;
+    const plain = "<p><a href=\"/u\">a</a></p>\n";
+    const titled = "<p><a href=\"/u\" title=\"t\">a</a></p>\n";
+    for ([_][2][]const u8{
+        .{ "[a]: /u\t\n\n[a]\n", plain },
+        .{ "[a]:\t/u\n\n[a]\n", plain },
+        .{ "[a]:\t\n\t/u \t\n\n[a]\n", plain },
+        .{ "[a]: /u\t\"t\"\t\n\n[a]\n", titled },
+        .{ "[a](\t/u\t)\n", plain },
+        .{ "[a](\t/u\t\"t\"\t)\n", titled },
+    }) |case| {
+        const out = try render(gpa, case[0]);
+        defer gpa.free(out);
+        try std.testing.expectEqualStrings(case[1], out);
+    }
+}

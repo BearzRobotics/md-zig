@@ -450,12 +450,13 @@ const Inl = struct {
         return true;
     }
 
+    /// Skips spaces and tabs, with at most one line ending among them.
     fn spnl(self: *Inl) void {
         const s = self.subject;
-        while (self.pos < s.len and s[self.pos] == ' ') self.pos += 1;
+        while (self.pos < s.len and text.isSpaceOrTab(s[self.pos])) self.pos += 1;
         if (self.pos < s.len and s[self.pos] == '\n') {
             self.pos += 1;
-            while (self.pos < s.len and s[self.pos] == ' ') self.pos += 1;
+            while (self.pos < s.len and text.isSpaceOrTab(s[self.pos])) self.pos += 1;
         }
     }
 
@@ -701,10 +702,10 @@ pub fn parseReference(a: Allocator, refs: *RefMap, content: []const u8) Allocato
     return p.pos;
 }
 
-/// Consumes `' *(\n|$)'`.
+/// Consumes spaces and tabs followed by a line ending or the end.
 fn atLineEnd(p: *Inl) bool {
     var q = p.pos;
-    while (q < p.subject.len and p.subject[q] == ' ') q += 1;
+    while (q < p.subject.len and text.isSpaceOrTab(p.subject[q])) q += 1;
     if (q >= p.subject.len) {
         p.pos = q;
         return true;
