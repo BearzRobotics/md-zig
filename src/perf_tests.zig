@@ -52,3 +52,7 @@ test "time: autolink candidates" {
     try withinBudget("", "_www.", 200_000, "_a_b\n", md.Extensions.gfm);
     try withinBudget("www.a.com", ")", 400_000, "\n", md.Extensions.gfm);
 }
+
+test "time: a line of list markers" {
+    for ([_][]const u8{ "- ", "* " }) |marker| try withinBudget("", marker, 200_000, "x\n", .{});
+}

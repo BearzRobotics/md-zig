@@ -187,3 +187,10 @@ test "parentheses in a link destination are limited to 32 levels" {
         try std.testing.expectEqual(case[1], std.mem.find(u8, out, "<a ") != null);
     }
 }
+
+test "a thematic break is still found after list markers and failed attempts" {
+    const gpa = std.testing.allocator;
+    const out = try render(gpa, "- * - - -\n- - x\n* * *\n");
+    defer gpa.free(out);
+    try std.testing.expectEqualStrings("<ul>\n<li>\n<ul>\n<li>\n<hr />\n</li>\n</ul>\n</li>\n<li>\n<ul>\n<li>x</li>\n</ul>\n</li>\n</ul>\n<hr />\n", out);
+}

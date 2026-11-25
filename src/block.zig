@@ -46,6 +46,10 @@ pub const Parser = struct {
     indented: bool = false,
     blank: bool = false,
     partially_consumed_tab: bool = false,
+    /// A thematic break cannot start before this index of the current line: an
+    /// earlier attempt failed there. Without this, `- - - - x` takes quadratic
+    /// time, as each list marker looks for a break again.
+    no_break_before: usize = 0,
     all_closed: bool = true,
 
     pub fn init(a: Allocator, ext: opts.Extensions) Allocator.Error!Parser {
@@ -570,21 +574,31 @@ pub const Parser = struct {
         return 2;
     }
 
-    fn isThematicBreak(s: []const u8) bool {
+    /// Whether `s` is a thematic break. When a character rules it out, its
+    /// index is stored in `bad`.
+    fn isThematicBreak(s: []const u8, bad: *usize) bool {
         if (s.len == 0) return false;
         const c = s[0];
         if (c != '*' and c != '_' and c != '-') return false;
         var count: usize = 0;
-        for (s) |ch| {
+        for (s, 0..) |ch, i| {
             if (ch == c) {
                 count += 1;
-            } else if (!text.isSpaceOrTab(ch)) return false;
+            } else if (!text.isSpaceOrTab(ch)) {
+                bad.* = i;
+                return false;
+            }
         }
         return count >= 3;
     }
 
     fn startThematicBreak(self: *Parser) Allocator.Error!u8 {
-        if (self.indented or !isThematicBreak(self.line[self.next_nonspace..])) return 0;
+        if (self.indented or self.next_nonspace < self.no_break_before) return 0;
+        var bad: usize = 0;
+        if (!isThematicBreak(self.line[self.next_nonspace..], &bad)) {
+            if (bad > 0) self.no_break_before = self.next_nonspace + bad;
+            return 0;
+        }
         try self.closeUnmatchedBlocks();
         _ = try self.addChild(.thematic_break);
         self.advanceOffset(self.line.len - self.offset, false);
@@ -984,6 +998,7 @@ pub const Parser = struct {
         self.column = 0;
         self.blank = false;
         self.partially_consumed_tab = false;
+        self.no_break_before = 0;
         self.line_number += 1;
 
         var all_matched = true;
