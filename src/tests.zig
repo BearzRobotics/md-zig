@@ -291,7 +291,7 @@ test "a table ends where another block starts" {
     const alone = try renderWith(gpa, table, md.Extensions.gfm);
     defer gpa.free(alone);
     // As cmark-gfm does.
-    for ([_][]const u8{ "- x", "-", "* x", "+ x", "1. x", "2. x", "10) x", "***", "___", "---", "<div>", "</div>", "<!-- c -->", "<span>", "<?p", "    code", "> q", "# h", "```" }) |next| {
+    for ([_][]const u8{ "- x", "-", "* x", "+ x", "1. x", "2. x", "10) x", "***", "___", "---", "<div>", "</div>", "<!-- c -->", "<span>", "<?p", "    code", "> q", "# h", "```", "|", " | " }) |next| {
         const src = try std.mem.concat(gpa, u8, &.{ table, next, "\n" });
         defer gpa.free(src);
         const out = try renderWith(gpa, src, md.Extensions.gfm);

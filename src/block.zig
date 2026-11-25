@@ -761,6 +761,8 @@ pub const Parser = struct {
         if (self.indent >= code_indent) return true; // indented code
         const rest = self.line[self.next_nonspace..];
         if (rest.len == 0) return false;
+        // A lone pipe holds no cell, so it is no row (cmark-gfm).
+        if (std.mem.eql(u8, std.mem.trimEnd(u8, rest, " \t"), "|")) return true;
         if (rest[0] == '>') return true;
         if (rest[0] == '#') {
             var n: usize = 0;
