@@ -338,3 +338,19 @@ test "CRLF split across reads is one line ending" {
         try testing.expectEqualStrings("<p>a\nb</p>\n<p>c</p>\n", got);
     }
 }
+
+test "a byte order mark is skipped at the start only" {
+    const gpa = testing.allocator;
+    for ([_]struct { []const u8, []const u8 }{
+        .{ "\u{feff}# Hi\n", "<h1>Hi</h1>\n" },
+        .{ "\u{feff}---\na: 1\n---\n# Hi\n", "<h1>Hi</h1>\n" },
+        .{ "\u{feff}", "" },
+        .{ "a\n\u{feff}b\n", "<p>a\n\u{feff}b</p>\n" },
+    }) |case| {
+        var doc = try md.Document.parse(gpa, case[0], .{ .extensions = md.Extensions.all });
+        defer doc.deinit();
+        const got = try doc.toHtmlAlloc(gpa);
+        defer gpa.free(got);
+        try testing.expectEqualStrings(case[1], got);
+    }
+}

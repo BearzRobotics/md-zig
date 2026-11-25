@@ -70,9 +70,12 @@ pub const Document = struct {
             const end = try readLine(gpa, r, &line, options.max_line_bytes);
             if (end == 0 and line.items.len == 0) break;
 
+            var content: []const u8 = line.items;
+            // A byte order mark at the start of the input is not part of the text.
+            if (total == 0 and std.mem.startsWith(u8, content, "\u{feff}")) content = content[3..];
             total +|= line.items.len + end;
             if (total > options.max_bytes) return error.InputTooLarge;
-            feedLine(&parser, arena.allocator(), line.items) catch |e| return parser.failure(e);
+            feedLine(&parser, arena.allocator(), content) catch |e| return parser.failure(e);
             if (end == 0) break;
         }
         parser.finish() catch |e| return parser.failure(e);
