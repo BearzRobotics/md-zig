@@ -738,9 +738,24 @@ pub const Parser = struct {
         }
     }
 
-    /// True when the current line begins a block that would end a table.
+    /// A list marker of any kind: a bullet or up to nine digits with `.` or `)`,
+    /// then a space, a tab or the end of the line.
+    fn startsListMarker(rest: []const u8) bool {
+        var n: usize = 0;
+        if (rest[0] == '*' or rest[0] == '+' or rest[0] == '-') {
+            n = 1;
+        } else {
+            while (n < rest.len and n < 9 and std.ascii.isDigit(rest[n])) n += 1;
+            if (n == 0 or n >= rest.len or (rest[n] != '.' and rest[n] != ')')) return false;
+            n += 1;
+        }
+        return n == rest.len or text.isSpaceOrTab(rest[n]);
+    }
+
+    /// True when the current line begins a block that would end a table (GFM:
+    /// "the beginning of another block-level structure").
     fn startsOtherBlock(self: *const Parser) bool {
-        if (self.indent >= 4) return false;
+        if (self.indent >= code_indent) return true; // indented code
         const rest = self.line[self.next_nonspace..];
         if (rest.len == 0) return false;
         if (rest[0] == '>') return true;
@@ -750,7 +765,9 @@ pub const Parser = struct {
             if (n <= 6 and (n == rest.len or text.isSpaceOrTab(rest[n]))) return true;
         }
         if (openingFence(rest) != null) return true;
-        return false;
+        if (htmlBlockKind(rest) != 0) return true;
+        var bad: usize = 0;
+        return isThematicBreak(rest, &bad) or startsListMarker(rest);
     }
 
     /// `: definition` after a paragraph (whose lines become the terms) or after

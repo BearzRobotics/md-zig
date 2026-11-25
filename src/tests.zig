@@ -281,3 +281,26 @@ test "tabs are accepted around link destinations and titles" {
         try std.testing.expectEqualStrings(case[1], out);
     }
 }
+
+test "a table ends where another block starts" {
+    const gpa = std.testing.allocator;
+    const table = "| a |\n| - |\n| 1 |\n";
+    const alone = try renderWith(gpa, table, md.Extensions.gfm);
+    defer gpa.free(alone);
+    // As cmark-gfm does.
+    for ([_][]const u8{ "- x", "-", "* x", "+ x", "1. x", "2. x", "10) x", "***", "___", "---", "<div>", "</div>", "<!-- c -->", "<span>", "<?p", "    code", "> q", "# h", "```" }) |next| {
+        const src = try std.mem.concat(gpa, u8, &.{ table, next, "\n" });
+        defer gpa.free(src);
+        const out = try renderWith(gpa, src, md.Extensions.gfm);
+        defer gpa.free(out);
+        try std.testing.expect(std.mem.startsWith(u8, out, alone));
+        try std.testing.expect(out.len > alone.len);
+    }
+    for ([_][]const u8{ "plain", "===", "-x", "1.x", "#x", "<span>t", ": d", "[a]: /u" }) |next| {
+        const src = try std.mem.concat(gpa, u8, &.{ table, next, "\n" });
+        defer gpa.free(src);
+        const out = try renderWith(gpa, src, md.Extensions.gfm);
+        defer gpa.free(out);
+        try std.testing.expectEqual(@as(usize, 3), std.mem.count(u8, out, "<tr>"));
+    }
+}
