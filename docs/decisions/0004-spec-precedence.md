@@ -39,6 +39,18 @@ Every difference that is found is recorded in the table below.
 | Blank lines in an HTML block that is never closed | CommonMark 4.6: kinds 1 to 5 end only at their end condition or the end of the document | blank lines at the end were dropped | Follows the spec, as cmark does. |
 | `[^1](url)` where footnote 1 exists | CommonMark 6.3: an inline link | md-zig made a footnote reference followed by text | Follows the spec, as cmark-gfm does. |
 
+## Seen and left unchanged
+
+Differences from cmark 0.30.2 or cmark-gfm 0.29.0.gfm.13 found while comparing,
+where it is not clear that a specification requires a change:
+
+| Subject | md-zig | cmark or cmark-gfm |
+|---|---|---|
+| A footnote referred to only from footnote definitions that the body never reaches | not listed | listed (cmark-gfm) |
+| `\\|` (two backslashes) in a table row | the pipe separates cells | the pipe is part of the cell (cmark-gfm) |
+| Spaces on a blank line of an HTML block inside a list item | dropped | kept (cmark) |
+| A tab at the end of a line, before a soft line break | kept (the specification speaks of spaces) | removed (cmark) |
+
 ## Consequences
 
 - md-zig can differ from cmark or cmark-gfm where they differ from their own
