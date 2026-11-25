@@ -699,6 +699,11 @@ const Renderer = struct {
     /// The lines of a table cell wrapped to `width` (0: no wrapping), styles
     /// reset at the end of each line.
     fn cellLines(self: *Renderer, cell: *Node, width: usize) Error![]const []const u8 {
+        return self.wrapCell(cell, width, width != 0);
+    }
+
+    /// As `cellLines`; without `split_words`, a long word overflows `width`.
+    fn wrapCell(self: *Renderer, cell: *Node, width: usize, split_words: bool) Error![]const []const u8 {
         var buf: Io.Writer.Allocating = .init(self.a);
         // A header cell is bold from the start. As part of the style it
         // survives the resets that every line and style change begin with.
@@ -709,7 +714,7 @@ const Renderer = struct {
             .o = self.o,
             .defs = self.defs,
             .min_width = 4,
-            .split_words = width != 0,
+            .split_words = split_words,
             .used = self.used,
             .used_index = self.used_index,
         };
@@ -758,6 +763,9 @@ const Renderer = struct {
         // Natural column widths: every cell on one line.
         const widths = try self.a.alloc(usize, cols);
         @memset(widths, 1);
+        // The widest run of each column that cannot be wrapped.
+        const words = try self.a.alloc(usize, cols);
+        @memset(words, 1);
         var row = n.first_child;
         while (row) |r| : (row = r.next) {
             var c = r.first_child;
@@ -765,23 +773,22 @@ const Renderer = struct {
             while (c) |cell| : (c = cell.next) {
                 if (i >= cols) break;
                 for (try self.cellLines(cell, 0)) |line| widths[i] = @max(widths[i], visibleWidth(line));
+                // Wrapped as narrowly as it goes, each such run has its own line.
+                for (try self.wrapCell(cell, 1, false)) |line| words[i] = @max(words[i], visibleWidth(line));
                 i += 1;
             }
         }
 
-        // Too wide: narrow the widest column until the table fits.
+        // Too wide: narrow the columns until the table fits, but keep words
+        // whole for as long as some column can give way without splitting one.
         const avail = self.available();
         const frame = 3 * cols + 1;
         while (true) {
             var total: usize = frame;
             for (widths) |wd| total += wd;
             if (total <= avail) break;
-            var widest: usize = 0;
-            for (widths, 0..) |wd, i| {
-                if (wd > widths[widest]) widest = i;
-            }
-            if (widths[widest] <= 6) break;
-            widths[widest] -= 1;
+            const at = widestAbove(widths, words) orelse widestAbove(widths, null) orelse break;
+            widths[at] -= 1;
         }
 
         const fancy = self.o.unicode;
@@ -828,6 +835,17 @@ const Renderer = struct {
         }
         try self.border(widths, h, if (fancy) "└" else "+", if (fancy) "┴" else "+", if (fancy) "┘" else "+");
         self.endBlock();
+    }
+
+    /// The widest column that may still be narrowed: no column goes below 6,
+    /// nor, when `words` is given, below its longest word.
+    fn widestAbove(widths: []const usize, words: ?[]const usize) ?usize {
+        var found: ?usize = null;
+        for (widths, 0..) |wd, i| {
+            const floor = if (words) |w| @max(w[i], 6) else 6;
+            if (wd > floor and (found == null or wd > widths[found.?])) found = i;
+        }
+        return found;
     }
 
     fn countChildren(n: *Node) usize {

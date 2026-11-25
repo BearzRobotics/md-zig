@@ -422,3 +422,12 @@ test "justify does not pad the lines of a table cell" {
     defer gpa.free(justified);
     try testing.expectEqualStrings(plain, justified);
 }
+
+test "a table keeps words whole while another column can give way" {
+    const gpa = testing.allocator;
+    const src = "| key | meaning |\n|-|-|\n| server.max_header_bytes | the largest request head that is accepted from any client |\n";
+    const out = try text(gpa, src, md.Extensions.gfm, .{ .width = 50, .unicode = false });
+    defer gpa.free(out);
+    try expectFrame(out, 50);
+    try testing.expect(std.mem.find(u8, out, "| server.max_header_bytes |") != null);
+}
