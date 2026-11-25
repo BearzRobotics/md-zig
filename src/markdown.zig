@@ -109,7 +109,11 @@ const Gen = struct {
     /// has are already in its text.
     fn endsOpen(n: *Node) bool {
         var last = n;
-        while (last.kind != .html_block) last = last.last_child orelse return false;
+        // A blank line has no `>`, so it ends a quote and what is inside it.
+        while (last.kind != .html_block) {
+            if (last.kind == .block_quote) return false;
+            last = last.last_child orelse return false;
+        }
         const t = std.mem.trimStart(u8, last.literal, " ");
         const kind = block_parser.htmlBlockKind(t);
         return kind >= 1 and kind <= 5 and !block_parser.htmlBlockEnds(kind, last.literal);
