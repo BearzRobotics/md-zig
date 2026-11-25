@@ -76,38 +76,59 @@ pub fn closeTag(s: []const u8, i: usize) ?usize {
     return null;
 }
 
-fn comment(s: []const u8, i: usize) ?usize {
+/// Which closers a search has already failed to find in one subject. A search
+/// that fails from one position fails from every later one, so remembering it
+/// keeps many unclosed openers from taking quadratic time.
+pub const Misses = struct {
+    comment: bool = false,
+    processing_instruction: bool = false,
+    declaration: bool = false,
+    cdata: bool = false,
+};
+
+/// The position of `closer` at or after `from`, or null; `missed` records and
+/// short-circuits failure.
+fn findCloser(s: []const u8, from: usize, closer: []const u8, missed: *bool) ?usize {
+    if (missed.*) return null;
+    return std.mem.findPos(u8, s, from, closer) orelse {
+        missed.* = true;
+        return null;
+    };
+}
+
+fn comment(s: []const u8, i: usize, misses: *Misses) ?usize {
     if (!std.mem.startsWith(u8, s[i..], "<!--")) return null;
     const body = i + 4;
     if (std.mem.startsWith(u8, s[body..], ">")) return body + 1;
     if (std.mem.startsWith(u8, s[body..], "->")) return body + 2;
-    const end = std.mem.find(u8, s[body..], "-->") orelse return null;
-    return body + end + 3;
+    const end = findCloser(s, body, "-->", &misses.comment) orelse return null;
+    return end + 3;
 }
 
-fn processingInstruction(s: []const u8, i: usize) ?usize {
+fn processingInstruction(s: []const u8, i: usize, misses: *Misses) ?usize {
     if (!std.mem.startsWith(u8, s[i..], "<?")) return null;
-    const end = std.mem.find(u8, s[i + 2 ..], "?>") orelse return null;
-    return i + 2 + end + 2;
+    const end = findCloser(s, i + 2, "?>", &misses.processing_instruction) orelse return null;
+    return end + 2;
 }
 
-fn declaration(s: []const u8, i: usize) ?usize {
+fn declaration(s: []const u8, i: usize, misses: *Misses) ?usize {
     if (!std.mem.startsWith(u8, s[i..], "<!")) return null;
     if (i + 2 >= s.len or !std.ascii.isAlphabetic(s[i + 2])) return null;
-    const end = std.mem.findScalarPos(u8, s, i + 3, '>') orelse return null;
+    const end = findCloser(s, i + 3, ">", &misses.declaration) orelse return null;
     return end + 1;
 }
 
-fn cdata(s: []const u8, i: usize) ?usize {
+fn cdata(s: []const u8, i: usize, misses: *Misses) ?usize {
     if (!std.mem.startsWith(u8, s[i..], "<![CDATA[")) return null;
-    const end = std.mem.find(u8, s[i + 9 ..], "]]>") orelse return null;
-    return i + 9 + end + 3;
+    const end = findCloser(s, i + 9, "]]>", &misses.cdata) orelse return null;
+    return end + 3;
 }
 
-/// Any raw inline HTML construct that starts at `s[i]`.
-pub fn htmlInline(s: []const u8, i: usize) ?usize {
-    return openTag(s, i) orelse closeTag(s, i) orelse comment(s, i) orelse
-        processingInstruction(s, i) orelse declaration(s, i) orelse cdata(s, i);
+/// Any raw inline HTML construct that starts at `s[i]`. `misses` belongs to
+/// `s`; calls on one subject must come in order of increasing `i`.
+pub fn htmlInline(s: []const u8, i: usize, misses: *Misses) ?usize {
+    return openTag(s, i) orelse closeTag(s, i) orelse comment(s, i, misses) orelse
+        processingInstruction(s, i, misses) orelse declaration(s, i, misses) orelse cdata(s, i, misses);
 }
 
 /// `<scheme:rest>` where the scheme is 2 to 32 letters, digits, `+`, `.`, `-`
@@ -158,7 +179,8 @@ test "html tags" {
     try std.testing.expectEqual(@as(?usize, 12), openTag("<a href=\"x\">", 0));
     try std.testing.expectEqual(@as(?usize, null), openTag("<a href='x", 0));
     try std.testing.expectEqual(@as(?usize, 5), closeTag("</a >", 0));
-    try std.testing.expectEqual(@as(?usize, 5), comment("<!-->", 0));
+    var misses: Misses = .{};
+    try std.testing.expectEqual(@as(?usize, 5), comment("<!-->", 0, &misses));
     try std.testing.expectEqual(@as(?usize, 16), uriAutolink("<http://foo.bar>", 0));
     try std.testing.expect(emailAutolink("<foo@bar.example.com>", 0) != null);
 }

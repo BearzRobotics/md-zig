@@ -51,6 +51,7 @@ const Inl = struct {
     footnotes: ?*const std.StringHashMapUnmanaged(*Node) = null,
     subject: []const u8,
     pos: usize = 0,
+    html_misses: scan.Misses = .{},
     delims: ?*Delim = null,
     brackets: ?*Bracket = null,
 
@@ -213,7 +214,7 @@ const Inl = struct {
     }
 
     fn parseHtmlTag(self: *Inl, block: *Node) Allocator.Error!bool {
-        const end = scan.htmlInline(self.subject, self.pos) orelse return false;
+        const end = scan.htmlInline(self.subject, self.pos, &self.html_misses) orelse return false;
         const n = try self.newNode(.html_inline);
         n.literal = self.subject[self.pos..end];
         block.appendChild(n);
